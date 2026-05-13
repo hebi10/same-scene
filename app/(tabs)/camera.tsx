@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,9 +19,7 @@ import {
   TextInput,
   View
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue
 } from "react-native-reanimated";
@@ -138,6 +137,7 @@ export default function CameraScreen() {
   const [overlayLocked, setOverlayLocked] = useState(false);
   const [overlayResetKey, setOverlayResetKey] = useState(0);
   const insets = useSafeAreaInsets();
+  const isCameraModalOpen = guideSettingsOpen || cameraSettingsOpen || navigationOpen;
 
   useEffect(() => {
     if (
@@ -921,6 +921,7 @@ export default function CameraScreen() {
         </View>
       </Modal>
 
+      {!isCameraModalOpen ? (
       <View style={[styles.controls, { paddingBottom: insets.bottom + 10 }]}>
         {errorMessage ? (
           <Text selectable style={styles.errorText}>
@@ -1048,6 +1049,7 @@ export default function CameraScreen() {
           </>
         )}
       </View>
+      ) : null}
     </View>
   );
 }
@@ -1106,34 +1108,42 @@ function SmoothValueSlider({
     [max, min, onCommit]
   );
 
-  const sliderGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .shouldCancelWhenOutside(false)
-        .onBegin((event) => {
-          if (trackWidth <= 0) {
-            return;
-          }
+  const setValueFromLocation = useCallback(
+    (locationX: number, commit: boolean) => {
+      if (trackWidth <= 0) {
+        return;
+      }
 
-          const nextX = Math.max(0, Math.min(trackWidth, event.x));
-          thumbX.value = nextX;
-        })
-        .onUpdate((event) => {
-          if (trackWidth <= 0) {
-            return;
-          }
+      const nextX = Math.max(0, Math.min(trackWidth, locationX));
+      thumbX.value = nextX;
 
-          const nextX = Math.max(0, Math.min(trackWidth, event.x));
-          thumbX.value = nextX;
-        })
-        .onFinalize(() => {
-          if (trackWidth <= 0) {
-            return;
-          }
-
-          runOnJS(commitFromRatio)(thumbX.value / trackWidth);
-        }),
+      if (commit) {
+        commitFromRatio(nextX / trackWidth);
+      }
+    },
     [commitFromRatio, thumbX, trackWidth]
+  );
+
+  const sliderPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (event) => {
+          setValueFromLocation(event.nativeEvent.locationX, true);
+        },
+        onPanResponderMove: (event) => {
+          setValueFromLocation(event.nativeEvent.locationX, true);
+        },
+        onPanResponderRelease: (event) => {
+          setValueFromLocation(event.nativeEvent.locationX, true);
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderTerminate: (event) => {
+          setValueFromLocation(event.nativeEvent.locationX, true);
+        }
+      }),
+    [setValueFromLocation]
   );
 
   const fillStyle = useAnimatedStyle(() => ({
@@ -1151,16 +1161,15 @@ function SmoothValueSlider({
           <Text selectable={false} style={styles.compactSliderLabel}>
             {label}
           </Text>
-          <GestureDetector gesture={sliderGesture}>
-            <Animated.View
-              style={[styles.sizeTrack, styles.compactSizeTrack]}
-              onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-            >
-              <View style={styles.sizeTrackFillBase} />
-              <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
-              <Animated.View style={[styles.sizeThumb, thumbStyle]} />
-            </Animated.View>
-          </GestureDetector>
+          <Animated.View
+            style={[styles.sizeTrack, styles.compactSizeTrack]}
+            onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+            {...sliderPanResponder.panHandlers}
+          >
+            <View style={styles.sizeTrackFillBase} />
+            <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
+            <Animated.View style={[styles.sizeThumb, thumbStyle]} />
+          </Animated.View>
           <Text selectable={false} style={styles.compactSliderValue}>
             {Math.round(value)}%
           </Text>
@@ -1179,16 +1188,15 @@ function SmoothValueSlider({
           {Math.round(value)}%
         </Text>
       </View>
-      <GestureDetector gesture={sliderGesture}>
-        <Animated.View
-          style={styles.sizeTrack}
-          onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-        >
-          <View style={styles.sizeTrackFillBase} />
-          <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
-          <Animated.View style={[styles.sizeThumb, thumbStyle]} />
-        </Animated.View>
-      </GestureDetector>
+      <Animated.View
+        style={styles.sizeTrack}
+        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+        {...sliderPanResponder.panHandlers}
+      >
+        <View style={styles.sizeTrackFillBase} />
+        <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
+        <Animated.View style={[styles.sizeThumb, thumbStyle]} />
+      </Animated.View>
     </View>
   );
 }
@@ -1437,7 +1445,7 @@ const styles = StyleSheet.create({
     paddingBottom: 22,
     borderWidth: 1,
     borderColor: colors.darkLine,
-    backgroundColor: "rgba(255, 255, 255, 0.8)"
+    backgroundColor: "rgba(255, 255, 255, 0.5)"
   },
   navModal: {
     gap: 18,
@@ -1659,16 +1667,18 @@ const styles = StyleSheet.create({
   },
   colorRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10
+    flexWrap: "nowrap",
+    justifyContent: "space-between",
+    gap: 4
   },
   colorOption: {
     minHeight: 44,
-    minWidth: 58,
+    flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 10,
+    gap: 5,
+    paddingHorizontal: 4,
     borderWidth: 1,
     borderColor: colors.line
   },
@@ -1683,7 +1693,7 @@ const styles = StyleSheet.create({
   },
   colorLabel: {
     color: colors.text,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "800",
     letterSpacing: 0
   },

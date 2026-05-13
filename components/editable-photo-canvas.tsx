@@ -27,6 +27,7 @@ type EditablePhotoCanvasProps = {
 export type EditablePhotoCanvasHandle = {
   reset: () => void;
   rotateRight: () => void;
+  fillFrame: () => void;
   getTransform: () => PhotoEditTransform;
 };
 
@@ -72,6 +73,31 @@ export const EditablePhotoCanvas = forwardRef<
     rotation.value = 0;
   }, [rotation, scale, translateX, translateY]);
 
+  const getCoverScale = useCallback(() => {
+    if (!frameSize.width || !frameSize.height || !originalAspectRatio) {
+      return 1;
+    }
+
+    const frameAspectRatio = frameSize.width / frameSize.height;
+    const normalizedRotation = Math.abs(rotation.value % Math.PI);
+    const isQuarterTurn = Math.abs(normalizedRotation - Math.PI / 2) < 0.01;
+    const imageAspectRatio = isQuarterTurn
+      ? 1 / originalAspectRatio
+      : originalAspectRatio;
+
+    if (imageAspectRatio > frameAspectRatio) {
+      return imageAspectRatio / frameAspectRatio;
+    }
+
+    return frameAspectRatio / imageAspectRatio;
+  }, [frameSize.height, frameSize.width, originalAspectRatio, rotation]);
+
+  const fillFrame = useCallback(() => {
+    translateX.value = 0;
+    translateY.value = 0;
+    scale.value = Math.max(1, getCoverScale());
+  }, [getCoverScale, scale, translateX, translateY]);
+
   const applyTransform = useCallback(
     (transform: PhotoEditTransform) => {
       translateX.value = transform.translateX;
@@ -97,6 +123,7 @@ export const EditablePhotoCanvas = forwardRef<
     rotateRight: () => {
       rotation.value += Math.PI / 2;
     },
+    fillFrame,
     getTransform: () => ({
       ratioLabel: ratio,
       translateX: Number(translateX.value.toFixed(2)),

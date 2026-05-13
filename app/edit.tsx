@@ -15,7 +15,7 @@ import {
   type EditablePhotoCanvasHandle
 } from "@/components/editable-photo-canvas";
 import { colors, controls, typography } from "@/constants/app-theme";
-import type { GuideType } from "@/constants/camera-guides";
+import { GUIDE_LABELS, GUIDE_TYPES, type GuideType } from "@/constants/camera-guides";
 import {
   clearEditDraft,
   getEditDraft,
@@ -23,7 +23,14 @@ import {
   saveEditDraft,
   type PhotoEditDraft
 } from "@/lib/photo-edit-draft";
-import { defaultAppSettings, getAppSettings } from "@/lib/app-settings";
+import {
+  DEFAULT_GUIDE_COLOR,
+  GUIDE_SIZE_MAX,
+  GUIDE_SIZE_MIN,
+  defaultAppSettings,
+  getAppSettings,
+  updateAppSettings
+} from "@/lib/app-settings";
 import { getPhotoById, saveEditedPhoto } from "@/lib/photo-library";
 import { getUserFacingErrorMessage } from "@/lib/user-facing-error";
 import type { PhotoEditTransform, PhotoItem, PhotoRatioLabel } from "@/types/photo";
@@ -36,6 +43,19 @@ type EditableSource = {
 };
 
 const ratios: PhotoRatioLabel[] = ["Original", "1:1", "3:4", "4:5", "9:16", "16:9"];
+const GUIDE_SIZE_OPTIONS = [
+  { label: "작게", value: 34 },
+  { label: "기본", value: 44 },
+  { label: "크게", value: 56 }
+] as const;
+const GUIDE_COLOR_OPTIONS = [
+  { label: "흰색", value: DEFAULT_GUIDE_COLOR },
+  { label: "노랑", value: "#F5D76E" },
+  { label: "민트", value: "#8CECC1" },
+  { label: "파랑", value: "#A9D7FF" },
+  { label: "빨강", value: "#FF5A5F" },
+  { label: "검정", value: "rgba(17, 17, 17, 0.78)" }
+] as const;
 
 const ratioDisplayLabel = (value: PhotoRatioLabel) =>
   value === "Original" ? "원본" : value;
@@ -78,6 +98,7 @@ export default function EditScreen() {
   const [guideVisible, setGuideVisible] = useState(defaultAppSettings.guideVisible);
   const [guideSize, setGuideSize] = useState(defaultAppSettings.guideSize);
   const [guideColor, setGuideColor] = useState(defaultAppSettings.guideColor);
+  const [guidePanelOpen, setGuidePanelOpen] = useState(false);
   const originalAspectRatio =
     source?.width && source?.height ? source.width / source.height : undefined;
 
@@ -277,6 +298,41 @@ export default function EditScreen() {
     }
   };
 
+  const updateGuideType = (nextGuide: GuideType) => {
+    setGuide(nextGuide);
+    setGuideVisible(true);
+    void updateAppSettings({
+      defaultGuide: nextGuide,
+      guideVisible: true
+    });
+  };
+
+  const updateGuideVisibility = (nextVisible: boolean) => {
+    setGuideVisible(nextVisible);
+    void updateAppSettings({ guideVisible: nextVisible });
+  };
+
+  const updateGuideSize = (nextSize: number) => {
+    const clampedSize = Math.round(
+      Math.max(GUIDE_SIZE_MIN, Math.min(GUIDE_SIZE_MAX, nextSize))
+    );
+    setGuideSize(clampedSize);
+    setGuideVisible(true);
+    void updateAppSettings({
+      guideSize: clampedSize,
+      guideVisible: true
+    });
+  };
+
+  const updateGuideColor = (nextColor: string) => {
+    setGuideColor(nextColor);
+    setGuideVisible(true);
+    void updateAppSettings({
+      guideColor: nextColor,
+      guideVisible: true
+    });
+  };
+
   const saveEdit = async () => {
     if (!source || isSaving) {
       setMessage("저장하기 전에 사진을 먼저 불러와 주세요.");
@@ -286,7 +342,7 @@ export default function EditScreen() {
     try {
       setIsSaving(true);
       setMessage(null);
-      const savedPhoto = await saveEditedPhoto({
+      await saveEditedPhoto({
         sourceUri: source.uri,
         sourcePhotoId: source.sourcePhotoId,
         width: source.width,
@@ -295,7 +351,7 @@ export default function EditScreen() {
       });
 
       await clearEditDraft();
-      router.replace(`/photo/${savedPhoto.id}` as Href);
+      router.replace("/studio?tab=works" as Href);
     } catch (error) {
       setMessage(getUserFacingErrorMessage(error, "편집 결과를 저장하지 못했습니다."));
     } finally {
@@ -411,6 +467,110 @@ export default function EditScreen() {
           })}
         </View>
 
+        <View style={styles.guidePanel}>
+          <Pressable
+            style={styles.guidePanelHeader}
+            onPress={() => setGuidePanelOpen((value) => !value)}
+          >
+            <View style={styles.guidePanelCopy}>
+              <Text selectable={false} style={styles.guidePanelTitle}>
+                가이드라인
+              </Text>
+              <Text selectable={false} style={styles.guidePanelDetail}>
+                {guideVisible ? "표시 중" : "숨김"} / {GUIDE_LABELS[guide]} / {guideSize}
+              </Text>
+            </View>
+            <Text selectable={false} style={styles.guidePanelAction}>
+              {guidePanelOpen ? "닫기" : "설정"}
+            </Text>
+          </Pressable>
+
+          {guidePanelOpen ? (
+            <View style={styles.guideControls}>
+              <View style={styles.guideOptionRow}>
+                {GUIDE_TYPES.map((type) => (
+                  <Pressable
+                    key={type}
+                    style={[styles.guideChip, guide === type && styles.guideChipActive]}
+                    onPress={() => updateGuideType(type)}
+                  >
+                    <Text
+                      selectable={false}
+                      style={[
+                        styles.guideChipText,
+                        guide === type && styles.guideChipTextActive
+                      ]}
+                    >
+                      {GUIDE_LABELS[type]}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.guideOptionRow}>
+                {GUIDE_SIZE_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.value}
+                    style={[
+                      styles.guideChip,
+                      guideSize === option.value && styles.guideChipActive
+                    ]}
+                    onPress={() => updateGuideSize(option.value)}
+                  >
+                    <Text
+                      selectable={false}
+                      style={[
+                        styles.guideChipText,
+                        guideSize === option.value && styles.guideChipTextActive
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.guideColorRow}>
+                {GUIDE_COLOR_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.label}
+                    style={[
+                      styles.guideColorOption,
+                      guideColor === option.value && styles.guideColorOptionActive
+                    ]}
+                    onPress={() => updateGuideColor(option.value)}
+                  >
+                    <View
+                      style={[
+                        styles.guideColorSwatch,
+                        { backgroundColor: option.value }
+                      ]}
+                    />
+                    <Text selectable={false} style={styles.guideColorLabel}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable
+                style={[
+                  styles.guideVisibilityButton,
+                  guideVisible && styles.guideVisibilityButtonActive
+                ]}
+                onPress={() => updateGuideVisibility(!guideVisible)}
+              >
+                <Text
+                  selectable={false}
+                  style={[
+                    styles.guideVisibilityText,
+                    guideVisible && styles.guideVisibilityTextActive
+                  ]}
+                >
+                  가이드 {guideVisible ? "숨기기" : "보이기"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+
         <View style={styles.toolRow}>
           <Pressable style={[styles.toolButton, styles.toolButtonActive]}>
             <Text selectable={false} style={styles.toolButtonText}>
@@ -419,10 +579,18 @@ export default function EditScreen() {
           </Pressable>
           <Pressable
             style={styles.toolButton}
+            onPress={() => canvasRef.current?.fillFrame()}
+          >
+            <Text selectable={false} style={styles.toolButtonText}>
+              가득 채우기
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.toolButton}
             onPress={() => canvasRef.current?.rotateRight()}
           >
             <Text selectable={false} style={styles.toolButtonText}>
-              회전
+              90도 회전
             </Text>
           </Pressable>
           <Pressable style={styles.toolButton} onPress={() => canvasRef.current?.reset()}>
@@ -624,12 +792,128 @@ const styles = StyleSheet.create({
   ratioTextActive: {
     color: colors.inverse
   },
+  guidePanel: {
+    gap: 10,
+    paddingTop: 2
+  },
+  guidePanelHeader: {
+    minHeight: controls.compactHeight,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  guidePanelCopy: {
+    flex: 1,
+    gap: 3
+  },
+  guidePanelTitle: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  guidePanelDetail: {
+    color: colors.muted,
+    fontSize: 11,
+    letterSpacing: 0
+  },
+  guidePanelAction: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  guideControls: {
+    gap: 8
+  },
+  guideOptionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6
+  },
+  guideChip: {
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  guideChipActive: {
+    borderColor: colors.text,
+    backgroundColor: colors.text
+  },
+  guideChipText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  guideChipTextActive: {
+    color: colors.inverse
+  },
+  guideColorRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    justifyContent: "space-between",
+    gap: 4
+  },
+  guideColorOption: {
+    flex: 1,
+    minHeight: 42,
+    minWidth: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  guideColorOptionActive: {
+    borderColor: colors.text
+  },
+  guideColorSwatch: {
+    width: 16,
+    height: 16,
+    borderWidth: 1,
+    borderColor: colors.darkLine
+  },
+  guideColorLabel: {
+    color: colors.text,
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  guideVisibilityButton: {
+    minHeight: controls.compactHeight,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.text
+  },
+  guideVisibilityButtonActive: {
+    backgroundColor: colors.text
+  },
+  guideVisibilityText: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  guideVisibilityTextActive: {
+    color: colors.inverse
+  },
   toolRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8
   },
   toolButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "47%",
     minHeight: controls.height,
     alignItems: "center",
     justifyContent: "center",

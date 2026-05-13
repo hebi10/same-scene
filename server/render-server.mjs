@@ -27,6 +27,25 @@ const musicFiles = {
   minimal: path.join(projectRoot, "assets", "audio", "minimal.wav")
 };
 
+const resolveFfmpegCommand = async () => {
+  if (process.env.FFMPEG_PATH) {
+    return process.env.FFMPEG_PATH;
+  }
+
+  try {
+    const ffmpegStatic = await import("ffmpeg-static");
+    if (ffmpegStatic.default) {
+      return ffmpegStatic.default;
+    }
+  } catch {
+    // ffmpeg-static is optional. Fall back to a system ffmpeg command.
+  }
+
+  return "ffmpeg";
+};
+
+const ffmpegCommandPromise = resolveFfmpegCommand();
+
 const getCustomMusicExtension = (fileName = "", mimeType = "") => {
   const cleanName = fileName.split("?")[0].toLowerCase();
   const match = cleanName.match(/\.([a-z0-9]+)$/);
@@ -74,6 +93,14 @@ const run = (command, args, cwd) =>
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
+    child.on("error", (error) => {
+      if (error?.code === "ENOENT") {
+        reject(new Error(`${command} 명령을 찾을 수 없습니다.`));
+        return;
+      }
+
+      reject(error);
+    });
     child.on("close", (code) => {
       if (code === 0) {
         resolve();
@@ -83,6 +110,23 @@ const run = (command, args, cwd) =>
       reject(new Error(stderr || `${command} exited with ${code}`));
     });
   });
+
+const ensureFfmpegAvailable = async () => {
+  const ffmpegCommand = await ffmpegCommandPromise;
+
+  try {
+    await run(ffmpegCommand, ["-version"], projectRoot);
+  } catch {
+    throw new Error(
+      "FFmpeg를 찾을 수 없습니다. PC에 FFmpeg를 설치하거나 FFMPEG_PATH를 지정한 뒤 렌더 서버를 다시 실행해 주세요."
+    );
+  }
+};
+
+const runFfmpeg = async (args, cwd) => {
+  const ffmpegCommand = await ffmpegCommandPromise;
+  await run(ffmpegCommand, args, cwd);
+};
 
 const getFrameFilter = ({ width, height, template, transition, duration }) => {
   if (template === "film-log") {
@@ -134,7 +178,7 @@ const mergeSegments = async ({
         .join("\n")
     );
 
-    await run("ffmpeg", [
+    await runFfmpeg([
       "-y",
       "-f",
       "concat",
@@ -177,10 +221,12 @@ const mergeSegments = async ({
     outputPath
   );
 
-  await run("ffmpeg", args, workDir);
+  await runFfmpeg(args, workDir);
 };
 
 const renderTripClip = async (payload, origin) => {
+  await ensureFfmpegAvailable();
+
   if (!payload.frames?.length) {
     throw new Error("At least one frame is required.");
   }
@@ -210,7 +256,7 @@ const renderTripClip = async (payload, origin) => {
       duration
     });
 
-    await run("ffmpeg", [
+    await runFfmpeg([
       "-y",
       "-loop",
       "1",
@@ -254,7 +300,7 @@ const renderTripClip = async (payload, origin) => {
   }
 
   if (musicPath && existsSync(musicPath)) {
-    await run("ffmpeg", [
+    await runFfmpeg([
       "-y",
       "-i",
       videoOnlyPath,
@@ -270,7 +316,7 @@ const renderTripClip = async (payload, origin) => {
       outputPath
     ], workDir);
   } else {
-    await run("ffmpeg", ["-y", "-i", videoOnlyPath, "-c", "copy", outputPath], workDir);
+    await runFfmpeg(["-y", "-i", videoOnlyPath, "-c", "copy", outputPath], workDir);
   }
 
   await rm(workDir, { recursive: true, force: true });
@@ -306,6 +352,14 @@ createServer(async (request, response) => {
       const fileName = path.basename(url.pathname);
       const file = await readFile(path.join(publicRoot, fileName));
       send(response, 200, file, { "Content-Type": "video/mp4" });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/health") {
+      await ensureFfmpegAvailable();
+      send(response, 200, JSON.stringify({ ok: true }), {
+        "Content-Type": "application/json"
+      });
       return;
     }
 

@@ -13,6 +13,7 @@ import {
 
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
 import { deletePhoto, getPhotoById, togglePhotoForVideo } from "@/lib/photo-library";
+import { saveImageToLibrary } from "@/lib/trip-clip-export";
 import { getUserFacingErrorMessage } from "@/lib/user-facing-error";
 import type { PhotoItem } from "@/types/photo";
 
@@ -25,11 +26,40 @@ const formatDate = (value: string) =>
     minute: "2-digit"
   }).format(new Date(value));
 
+const getPhotoAspectRatio = (photo: PhotoItem) => {
+  if (photo.width > 0 && photo.height > 0) {
+    return photo.width / photo.height;
+  }
+
+  if (photo.ratioLabel === "1:1") {
+    return 1;
+  }
+
+  if (photo.ratioLabel === "3:4") {
+    return 3 / 4;
+  }
+
+  if (photo.ratioLabel === "4:5") {
+    return 4 / 5;
+  }
+
+  if (photo.ratioLabel === "9:16") {
+    return 9 / 16;
+  }
+
+  if (photo.ratioLabel === "16:9") {
+    return 16 / 9;
+  }
+
+  return 4 / 5;
+};
+
 export default function PhotoDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [photo, setPhoto] = useState<PhotoItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingToDevice, setIsSavingToDevice] = useState(false);
   const [isTogglingVideo, setIsTogglingVideo] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -51,6 +81,23 @@ export default function PhotoDetailScreen() {
     }, [loadPhoto])
   );
 
+  const saveToDevice = async () => {
+    if (!photo || isSavingToDevice) {
+      return;
+    }
+
+    try {
+      setIsSavingToDevice(true);
+      setMessage(null);
+      await saveImageToLibrary(photo.uri);
+      setMessage("사진을 핸드폰 앨범에 저장했습니다.");
+    } catch (error) {
+      setMessage(getUserFacingErrorMessage(error, "사진을 핸드폰에 저장하지 못했습니다."));
+    } finally {
+      setIsSavingToDevice(false);
+    }
+  };
+
   const removePhoto = async () => {
     if (!id || isDeleting) {
       return;
@@ -69,7 +116,7 @@ export default function PhotoDetailScreen() {
   };
 
   const confirmDelete = () => {
-    Alert.alert("사진을 삭제할까요?", "스튜디오에 저장된 사진이 삭제됩니다.", [
+    Alert.alert("사진을 삭제할까요?", "앱에 저장된 사진이 삭제됩니다.", [
       { text: "취소", style: "cancel" },
       { text: "삭제", style: "destructive", onPress: removePhoto }
     ]);
@@ -110,7 +157,7 @@ export default function PhotoDetailScreen() {
         </Text>
         <Pressable style={styles.darkButton} onPress={() => router.replace("/studio")}>
           <Text selectable={false} style={styles.darkButtonText}>
-            스튜디오로 돌아가기
+            편집으로 돌아가기
           </Text>
         </Pressable>
       </View>
@@ -123,7 +170,16 @@ export default function PhotoDetailScreen() {
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
     >
-      <Image source={{ uri: photo.uri }} style={styles.heroImage} contentFit="contain" />
+      <Image
+        source={{ uri: photo.uri }}
+        style={[
+          styles.heroImage,
+          {
+            aspectRatio: getPhotoAspectRatio(photo)
+          }
+        ]}
+        contentFit="contain"
+      />
 
       <View style={styles.header}>
         <Text selectable style={styles.eyebrow}>
@@ -146,10 +202,19 @@ export default function PhotoDetailScreen() {
 
       <View style={styles.actions}>
         <Pressable
-          style={styles.darkButton}
-          onPress={() => router.push(`/edit?photoId=${photo.id}` as Href)}
+          disabled={isSavingToDevice}
+          style={[styles.darkButton, isSavingToDevice && styles.disabledButton]}
+          onPress={saveToDevice}
         >
           <Text selectable={false} style={styles.darkButtonText}>
+            {isSavingToDevice ? "저장 중" : "핸드폰에 저장"}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={styles.lightButton}
+          onPress={() => router.push(`/edit?photoId=${photo.id}` as Href)}
+        >
+          <Text selectable={false} style={styles.lightButtonText}>
             사진 편집
           </Text>
         </Pressable>
@@ -221,7 +286,7 @@ const styles = StyleSheet.create({
   },
   heroImage: {
     width: "100%",
-    aspectRatio: 4 / 5,
+    maxHeight: 520,
     borderWidth: 1,
     borderColor: colors.line,
     backgroundColor: colors.ink

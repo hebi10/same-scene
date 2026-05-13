@@ -1,24 +1,34 @@
 import { Image } from "expo-image";
-import { type Href, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { ChevronIcon } from "@/components/chevron-icon";
 import { ScreenShell } from "@/components/screen-shell";
 import { SectionBlock } from "@/components/section-block";
 import { colors, controls, typography } from "@/constants/app-theme";
-import { getPhotos } from "@/lib/photo-library";
-import { getMadeVideos } from "@/lib/video-library";
+import { deletePhoto, getPhotos, saveCapturedPhoto } from "@/lib/photo-library";
+import { getUserFacingErrorMessage } from "@/lib/user-facing-error";
+import { deleteMadeVideo, getMadeVideos } from "@/lib/video-library";
+import { deleteImageBundleWork, getImageBundleWorks } from "@/lib/work-library";
 import type { PhotoItem } from "@/types/photo";
 import type { MadeVideoItem } from "@/types/video";
+import type { ImageBundleWorkItem } from "@/types/work";
 
-type StudioTab = "photos" | "edit" | "videos";
+type StudioTab = "photos" | "edit" | "works";
+type PageSize = 6 | 10 | 20;
+type StudioWorkItem =
+  | { kind: "single-image"; item: PhotoItem; createdAt: string }
+  | { kind: "image-bundle"; item: ImageBundleWorkItem; createdAt: string }
+  | { kind: "video"; item: MadeVideoItem; createdAt: string };
 
 const tabs: { label: string; value: StudioTab }[] = [
-  { label: "촬영 사진", value: "photos" },
-  { label: "편집하기", value: "edit" },
-  { label: "만든 영상", value: "videos" }
+  { label: "사진", value: "photos" },
+  { label: "편집", value: "edit" },
+  { label: "작업물", value: "works" }
 ];
+
+const PAGE_SIZE_OPTIONS: PageSize[] = [6, 10, 20];
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat("ko-KR", {
@@ -37,19 +47,26 @@ const formatDuration = (seconds: number) => {
 
 export default function StudioScreen() {
   const router = useRouter();
+  const { tab } = useLocalSearchParams<{ tab?: string }>();
   const [activeTab, setActiveTab] = useState<StudioTab>("photos");
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [videos, setVideos] = useState<MadeVideoItem[]>([]);
+  const [imageBundles, setImageBundles] = useState<ImageBundleWorkItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isImportingImage, setIsImportingImage] = useState(false);
+  const [pageSize, setPageSize] = useState<PageSize>(6);
+  const [pages, setPages] = useState<Record<string, number>>({});
 
   const loadStudio = useCallback(async () => {
     setIsLoading(true);
-    const [storedPhotos, storedVideos] = await Promise.all([
+    const [storedPhotos, storedVideos, storedImageBundles] = await Promise.all([
       getPhotos(),
-      getMadeVideos()
+      getMadeVideos(),
+      getImageBundleWorks()
     ]);
     setPhotos(storedPhotos);
     setVideos(storedVideos);
+    setImageBundles(storedImageBundles);
     setIsLoading(false);
   }, []);
 
@@ -59,9 +76,124 @@ export default function StudioScreen() {
     }, [loadStudio])
   );
 
+  useEffect(() => {
+    if (tab === "photos" || tab === "edit" || tab === "works") {
+      setActiveTab(tab);
+    }
+
+    if (tab === "videos") {
+      setActiveTab("works");
+    }
+  }, [tab]);
+
+  const setSectionPage = (key: string, page: number) => {
+    setPages((current) => ({
+      ...current,
+      [key]: Math.max(0, page)
+    }));
+  };
+
+  const changePageSize = (nextSize: PageSize) => {
+    setPageSize(nextSize);
+    setPages({});
+  };
+
+  const confirmDeletePhoto = (photo: PhotoItem) => {
+    Alert.alert("사진을 삭제할까요?", "앱에 저장된 사진이 삭제됩니다.", [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제",
+        style: "destructive",
+        onPress: async () => {
+          await deletePhoto(photo.id);
+          await loadStudio();
+        }
+      }
+    ]);
+  };
+
+  const confirmDeleteWork = (work: StudioWorkItem) => {
+    Alert.alert("작업물을 삭제할까요?", "앱에 저장된 작업물 기록이 삭제됩니다.", [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제",
+        style: "destructive",
+        onPress: async () => {
+          if (work.kind === "video") {
+            await deleteMadeVideo(work.item.id);
+          } else if (work.kind === "image-bundle") {
+            await deleteImageBundleWork(work.item.id);
+          } else {
+            await deletePhoto(work.item.id);
+          }
+          await loadStudio();
+        }
+      }
+    ]);
+  };
+
+  const importImageToApp = async () => {
+    if (isImportingImage) {
+      return;
+    }
+
+    try {
+      setIsImportingImage(true);
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(false);
+
+      if (!permission.granted) {
+        Alert.alert("권한 필요", "이미지를 앱에 저장하려면 앨범 접근 권한이 필요합니다.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1
+      });
+
+      if (result.canceled || !result.assets[0]?.uri) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      await saveCapturedPhoto({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height
+      });
+      await loadStudio();
+      setActiveTab("photos");
+      Alert.alert("저장 완료", "선택한 이미지를 앱 사진 목록에 저장했습니다.");
+    } catch (error) {
+      Alert.alert(
+        "저장 실패",
+        getUserFacingErrorMessage(error, "이미지를 앱에 저장하지 못했습니다.")
+      );
+    } finally {
+      setIsImportingImage(false);
+    }
+  };
+
   const capturedPhotos = photos.filter((photo) => photo.kind === "original");
   const editedPhotos = photos.filter((photo) => photo.edited);
-  const clipPhotos = photos.filter((photo) => photo.addedToVideo);
+  const singleImageWorks: StudioWorkItem[] = editedPhotos.map((item) => ({
+    kind: "single-image",
+    item,
+    createdAt: item.createdAt
+  }));
+  const imageBundleWorks: StudioWorkItem[] = imageBundles.map((item) => ({
+    kind: "image-bundle",
+    item,
+    createdAt: item.createdAt
+  }));
+  const videoWorks: StudioWorkItem[] = videos.map((item) => ({
+    kind: "video",
+    item,
+    createdAt: item.createdAt
+  }));
+  const workCount =
+    singleImageWorks.length + imageBundleWorks.length + videoWorks.length;
 
   return (
     <ScreenShell
@@ -91,43 +223,76 @@ export default function StudioScreen() {
         })}
       </View>
 
+      <PageSizeSelector value={pageSize} onChange={changePageSize} />
+
       {activeTab === "photos" ? (
-        <SectionBlock title="촬영 사진">
+        <>
+          <SectionBlock title="이미지 저장">
+            <Pressable
+              disabled={isImportingImage}
+              style={({ pressed }) => [
+                styles.importImageCta,
+                pressed && styles.pressed,
+                isImportingImage && styles.disabledAction
+              ]}
+              onPress={importImageToApp}
+            >
+              <View style={styles.clipCopy}>
+                <Text selectable style={styles.clipTitle}>
+                  앱에 이미지 저장
+                </Text>
+                <Text selectable style={styles.clipDetail}>
+                  핸드폰 앨범에서 이미지를 골라 앱 사진 목록에 보관합니다.
+                </Text>
+              </View>
+              <View style={styles.clipAction}>
+                <Text selectable={false} style={styles.clipActionText}>
+                  {isImportingImage ? "저장 중" : "이미지 선택"}
+                </Text>
+              </View>
+            </Pressable>
+          </SectionBlock>
+
+          <SectionBlock title="사진">
           {isLoading ? (
             <LoadingState />
           ) : capturedPhotos.length > 0 ? (
-            <View style={styles.photoGrid}>
-              {capturedPhotos.map((photo) => (
-                <PhotoCard key={photo.id} photo={photo} router={router} />
-              ))}
-            </View>
+            <PaginatedPhotoGrid
+              items={capturedPhotos}
+              page={pages.photos ?? 0}
+              pageSize={pageSize}
+              router={router}
+              onDeletePhoto={confirmDeletePhoto}
+              onPageChange={(page) => setSectionPage("photos", page)}
+            />
           ) : (
             <EmptyState
-              title="아직 촬영 사진이 없습니다."
+              title="아직 사진이 없습니다."
               detail="카메라에서 구도 가이드로 촬영하면 이곳에 사진이 표시됩니다."
             />
           )}
-        </SectionBlock>
+          </SectionBlock>
+        </>
       ) : null}
 
       {activeTab === "edit" ? (
         <>
-          <SectionBlock title="영상 만들기">
+          <SectionBlock title="여러 사진 작업">
             <Pressable
               style={({ pressed }) => [styles.clipCta, pressed && styles.pressed]}
               onPress={() => router.push("/trip-clip")}
             >
               <View style={styles.clipCopy}>
                 <Text selectable style={styles.clipTitle}>
-                  여행 클립 만들기
+                  여행 클립 / 이미지 묶음 만들기
                 </Text>
                 <Text selectable style={styles.clipDetail}>
-                  선택된 사진 {clipPhotos.length}장으로 템플릿과 음악을 적용합니다.
+                  여러 사진을 선택해 순서, 비율, 음악을 정하고 이미지 묶음이나 클립 작업으로 저장합니다.
                 </Text>
               </View>
               <View style={styles.clipAction}>
                 <Text selectable={false} style={styles.clipActionText}>
-                  시작
+                  사진 선택
                 </Text>
               </View>
             </Pressable>
@@ -137,11 +302,14 @@ export default function StudioScreen() {
             {isLoading ? (
               <LoadingState />
             ) : editedPhotos.length > 0 ? (
-              <View style={styles.photoGrid}>
-                {editedPhotos.map((photo) => (
-                  <PhotoCard key={photo.id} photo={photo} router={router} />
-                ))}
-              </View>
+              <PaginatedPhotoGrid
+                items={editedPhotos}
+                page={pages.editedPhotos ?? 0}
+                pageSize={pageSize}
+                router={router}
+                onDeletePhoto={confirmDeletePhoto}
+                onPageChange={(page) => setSectionPage("editedPhotos", page)}
+              />
             ) : (
               <EmptyState
                 title="아직 편집한 사진이 없습니다."
@@ -152,57 +320,68 @@ export default function StudioScreen() {
         </>
       ) : null}
 
-      {activeTab === "videos" ? (
-        <SectionBlock title="만든 영상">
+      {activeTab === "works" ? (
+        <>
           {isLoading ? (
-            <LoadingState />
-          ) : videos.length > 0 ? (
-            <View style={styles.videoList}>
-              {videos.map((video) => (
-                <Pressable
-                  key={video.id}
-                  style={({ pressed }) => [styles.videoCard, pressed && styles.pressed]}
-                  onPress={() => router.push(`/video/${video.id}` as Href)}
-                >
-                  {video.coverUri ? (
-                    <Image
-                      source={{ uri: video.coverUri }}
-                      style={styles.videoThumb}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View style={styles.videoThumbEmpty} />
-                  )}
-                  <View style={styles.videoCopy}>
-                    <Text selectable style={styles.videoTitle}>
-                      {video.title}
-                    </Text>
-                    <Text selectable style={styles.metaText}>
-                      {formatDate(video.createdAt)} / {video.ratio} / {formatDuration(video.duration)}
-                    </Text>
-                    <Text selectable style={styles.metaText}>
-                      사진 {video.photoIds.length}장 / {video.musicLabel}
-                    </Text>
-                  </View>
-                  <View style={styles.chevron}>
-                    <ChevronIcon color={colors.text} size={10} />
-                  </View>
-                </Pressable>
-              ))}
-            </View>
+            <SectionBlock title="작업물">
+              <LoadingState />
+            </SectionBlock>
+          ) : workCount > 0 ? (
+            <>
+              <WorkSection
+                title="단일 이미지"
+                emptyDetail="사진을 편집하면 이곳에 단일 이미지 작업물이 표시됩니다."
+                items={singleImageWorks}
+                page={pages.singleImages ?? 0}
+                pageSize={pageSize}
+                router={router}
+                onDeleteWork={confirmDeleteWork}
+                onPageChange={(page) => setSectionPage("singleImages", page)}
+              />
+              <WorkSection
+                title="이미지 묶음"
+                emptyDetail="여러 사진을 이미지로 저장하면 이곳에 표시됩니다."
+                items={imageBundleWorks}
+                page={pages.imageBundles ?? 0}
+                pageSize={pageSize}
+                router={router}
+                onDeleteWork={confirmDeleteWork}
+                onPageChange={(page) => setSectionPage("imageBundles", page)}
+              />
+              <WorkSection
+                title="영상"
+                emptyDetail="여행 클립을 저장하면 이곳에 표시됩니다."
+                items={videoWorks}
+                page={pages.videos ?? 0}
+                pageSize={pageSize}
+                router={router}
+                onDeleteWork={confirmDeleteWork}
+                onPageChange={(page) => setSectionPage("videos", page)}
+              />
+            </>
           ) : (
-            <EmptyState
-              title="아직 만든 영상이 없습니다."
-              detail="여행 클립을 MP4로 저장하면 이곳에서 다시 볼 수 있습니다."
-            />
+            <SectionBlock title="작업물">
+              <EmptyState
+                title="아직 작업물이 없습니다."
+                detail="단일 이미지 편집, 이미지 묶음, 여행 클립을 저장하면 이곳에 표시됩니다."
+              />
+            </SectionBlock>
           )}
-        </SectionBlock>
+        </>
       ) : null}
     </ScreenShell>
   );
 }
 
-function PhotoCard({ photo, router }: { photo: PhotoItem; router: ReturnType<typeof useRouter> }) {
+function PhotoCard({
+  photo,
+  router,
+  onDelete
+}: {
+  photo: PhotoItem;
+  router: ReturnType<typeof useRouter>;
+  onDelete: (photo: PhotoItem) => void;
+}) {
   return (
     <View style={styles.photoCard}>
       <Pressable onPress={() => router.push(`/photo/${photo.id}` as Href)}>
@@ -233,9 +412,356 @@ function PhotoCard({ photo, router }: { photo: PhotoItem; router: ReturnType<typ
             보기
           </Text>
         </Pressable>
+        <Pressable
+          style={styles.cardLightButton}
+          onPress={() => onDelete(photo)}
+        >
+          <Text selectable={false} style={styles.cardDeleteButtonText}>
+            삭제
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
+}
+
+function PageSizeSelector({
+  value,
+  onChange
+}: {
+  value: PageSize;
+  onChange: (value: PageSize) => void;
+}) {
+  return (
+    <View style={styles.pageSizeBar}>
+      <Text selectable={false} style={styles.pageSizeLabel}>
+        표시
+      </Text>
+      <View style={styles.pageSizeOptions}>
+        {PAGE_SIZE_OPTIONS.map((option) => {
+          const isActive = value === option;
+
+          return (
+            <Pressable
+              key={option}
+              style={[styles.pageSizeButton, isActive && styles.pageSizeButtonActive]}
+              onPress={() => onChange(option)}
+            >
+              <Text
+                selectable={false}
+                style={[
+                  styles.pageSizeButtonText,
+                  isActive && styles.pageSizeButtonTextActive
+                ]}
+              >
+                {option}개
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function getPaginatedItems<T>(items: T[], page: number, pageSize: number) {
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const start = safePage * pageSize;
+
+  return {
+    items: items.slice(start, start + pageSize),
+    page: safePage,
+    totalPages
+  };
+}
+
+function PaginatedPhotoGrid({
+  items,
+  page,
+  pageSize,
+  router,
+  onDeletePhoto,
+  onPageChange
+}: {
+  items: PhotoItem[];
+  page: number;
+  pageSize: PageSize;
+  router: ReturnType<typeof useRouter>;
+  onDeletePhoto: (photo: PhotoItem) => void;
+  onPageChange: (page: number) => void;
+}) {
+  const result = getPaginatedItems(items, page, pageSize);
+
+  return (
+    <View style={styles.paginatedList}>
+      <View style={styles.photoGrid}>
+        {result.items.map((photo) => (
+          <PhotoCard
+            key={photo.id}
+            photo={photo}
+            router={router}
+            onDelete={onDeletePhoto}
+          />
+        ))}
+      </View>
+      <PaginationControls
+        page={result.page}
+        totalPages={result.totalPages}
+        totalItems={items.length}
+        onPageChange={onPageChange}
+      />
+    </View>
+  );
+}
+
+function WorkSection({
+  title,
+  emptyDetail,
+  items,
+  page,
+  pageSize,
+  router,
+  onDeleteWork,
+  onPageChange
+}: {
+  title: string;
+  emptyDetail: string;
+  items: StudioWorkItem[];
+  page: number;
+  pageSize: PageSize;
+  router: ReturnType<typeof useRouter>;
+  onDeleteWork: (work: StudioWorkItem) => void;
+  onPageChange: (page: number) => void;
+}) {
+  const result = getPaginatedItems(items, page, pageSize);
+
+  return (
+    <SectionBlock title={title}>
+      {items.length > 0 ? (
+        <View style={styles.paginatedList}>
+          <View style={styles.videoList}>
+            {result.items.map((work) => (
+              <WorkCard
+                key={`${work.kind}-${work.item.id}`}
+                work={work}
+                router={router}
+                onDelete={onDeleteWork}
+              />
+            ))}
+          </View>
+          <PaginationControls
+            page={result.page}
+            totalPages={result.totalPages}
+            totalItems={items.length}
+            onPageChange={onPageChange}
+          />
+        </View>
+      ) : (
+        <EmptyState title={`${title} 작업물이 없습니다.`} detail={emptyDetail} />
+      )}
+    </SectionBlock>
+  );
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  totalItems,
+  onPageChange
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) {
+    return (
+      <Text selectable={false} style={styles.paginationMeta}>
+        총 {totalItems}개
+      </Text>
+    );
+  }
+
+  return (
+    <View style={styles.paginationBar}>
+      <Pressable
+        disabled={page <= 0}
+        style={[styles.paginationButton, page <= 0 && styles.paginationButtonDisabled]}
+        onPress={() => onPageChange(page - 1)}
+      >
+        <Text selectable={false} style={styles.paginationButtonText}>
+          이전
+        </Text>
+      </Pressable>
+      <Text selectable={false} style={styles.paginationMeta}>
+        {page + 1} / {totalPages} · 총 {totalItems}개
+      </Text>
+      <Pressable
+        disabled={page >= totalPages - 1}
+        style={[
+          styles.paginationButton,
+          page >= totalPages - 1 && styles.paginationButtonDisabled
+        ]}
+        onPress={() => onPageChange(page + 1)}
+      >
+        <Text selectable={false} style={styles.paginationButtonText}>
+          다음
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function WorkCard({
+  work,
+  router,
+  onDelete
+}: {
+  work: StudioWorkItem;
+  router: ReturnType<typeof useRouter>;
+  onDelete: (work: StudioWorkItem) => void;
+}) {
+  if (work.kind === "single-image") {
+    const photo = work.item;
+
+    return (
+      <View style={styles.videoCard}>
+        <Image source={{ uri: photo.uri }} style={styles.videoThumb} contentFit="cover" />
+        <Pressable
+          style={({ pressed }) => [styles.videoCopy, pressed && styles.pressed]}
+          onPress={() => router.push(`/photo/${photo.id}` as Href)}
+        >
+          <Text selectable style={styles.videoKind}>
+            단일 이미지
+          </Text>
+          <Text selectable style={styles.videoTitle}>
+            편집 이미지
+          </Text>
+          <Text selectable style={styles.metaText}>
+            {formatDate(photo.createdAt)} / {photo.ratioLabel}
+          </Text>
+          <Text selectable style={styles.metaText}>
+            사진 편집 결과
+          </Text>
+        </Pressable>
+        <View style={styles.workActions}>
+          <Pressable
+            style={styles.workEditButton}
+            onPress={() => router.push(`/edit?photoId=${photo.id}` as Href)}
+          >
+            <Text selectable={false} style={styles.workEditButtonText}>
+              다시 편집
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.workDeleteButton}
+            onPress={() => onDelete(work)}
+          >
+            <Text selectable={false} style={styles.workDeleteButtonText}>
+              삭제
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (work.kind === "video") {
+    const video = work.item;
+
+    return (
+      <View style={styles.videoCard}>
+        {video.coverUri ? (
+          <Image source={{ uri: video.coverUri }} style={styles.videoThumb} contentFit="cover" />
+        ) : (
+          <View style={styles.videoThumbEmpty} />
+        )}
+        <Pressable
+          style={({ pressed }) => [styles.videoCopy, pressed && styles.pressed]}
+          onPress={() => router.push(`/video/${video.id}` as Href)}
+        >
+          <Text selectable style={styles.videoKind}>
+            저장한 영상
+          </Text>
+          <Text selectable style={styles.videoTitle}>
+            {video.title}
+          </Text>
+          <Text selectable style={styles.metaText}>
+            {formatDate(video.createdAt)} / {video.ratio} / {formatDuration(video.duration)}
+          </Text>
+          <Text selectable style={styles.metaText}>
+            사진 {video.photoIds.length}장 / {video.musicLabel}
+          </Text>
+        </Pressable>
+        <View style={styles.workActions}>
+          <Pressable
+            style={styles.workEditButton}
+            onPress={() => router.push(`/trip-clip?videoId=${video.id}` as Href)}
+          >
+            <Text selectable={false} style={styles.workEditButtonText}>
+              다시 편집
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.workDeleteButton}
+            onPress={() => onDelete(work)}
+          >
+            <Text selectable={false} style={styles.workDeleteButtonText}>
+              삭제
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  const bundle = work.item;
+
+  return (
+    <View style={styles.videoCard}>
+      {bundle.coverUri ? (
+        <Image source={{ uri: bundle.coverUri }} style={styles.videoThumb} contentFit="cover" />
+      ) : (
+        <View style={styles.videoThumbEmpty} />
+      )}
+      <Pressable
+        style={({ pressed }) => [styles.videoCopy, pressed && styles.pressed]}
+        onPress={() => router.push(`/trip-clip?bundleId=${bundle.id}` as Href)}
+      >
+        <Text selectable style={styles.videoKind}>
+          이미지 묶음
+        </Text>
+        <Text selectable style={styles.videoTitle}>
+          {bundle.title}
+        </Text>
+        <Text selectable style={styles.metaText}>
+          {formatDate(bundle.createdAt)} / {bundle.ratio}
+        </Text>
+        <Text selectable style={styles.metaText}>
+          이미지 {bundle.photoIds.length}장
+        </Text>
+      </Pressable>
+    <View style={styles.workActions}>
+      <Pressable
+        style={styles.workEditButton}
+        onPress={() => router.push(`/trip-clip?bundleId=${bundle.id}` as Href)}
+      >
+        <Text selectable={false} style={styles.workEditButtonText}>
+          다시 편집
+        </Text>
+      </Pressable>
+      <Pressable
+        style={styles.workDeleteButton}
+        onPress={() => onDelete(work)}
+      >
+        <Text selectable={false} style={styles.workDeleteButtonText}>
+          삭제
+        </Text>
+      </Pressable>
+    </View>
+  </View>
+);
 }
 
 function LoadingState() {
@@ -286,7 +812,54 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: colors.inverse
   },
+  pageSizeBar: {
+    minHeight: controls.compactHeight,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingTop: 2
+  },
+  pageSizeLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  pageSizeOptions: {
+    flexDirection: "row",
+    gap: 6
+  },
+  pageSizeButton: {
+    minHeight: 32,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  pageSizeButtonActive: {
+    borderColor: colors.text,
+    backgroundColor: colors.text
+  },
+  pageSizeButtonText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  pageSizeButtonTextActive: {
+    color: colors.inverse
+  },
   clipCta: {
+    gap: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: colors.background
+  },
+  importImageCta: {
     gap: 16,
     paddingVertical: 16,
     paddingHorizontal: 16,
@@ -296,6 +869,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     backgroundColor: colors.surfaceStrong
+  },
+  disabledAction: {
+    opacity: 0.45
   },
   clipCopy: {
     gap: 8
@@ -331,6 +907,9 @@ const styles = StyleSheet.create({
     minHeight: 120,
     alignItems: "center",
     justifyContent: "center"
+  },
+  paginatedList: {
+    gap: 12
   },
   photoGrid: {
     flexDirection: "row",
@@ -395,8 +974,46 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0
   },
+  cardDeleteButtonText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
   videoList: {
     gap: 10
+  },
+  paginationBar: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  paginationButton: {
+    minHeight: 32,
+    minWidth: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.text
+  },
+  paginationButtonDisabled: {
+    opacity: 0.35
+  },
+  paginationButtonText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  paginationMeta: {
+    flex: 1,
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 17,
+    textAlign: "center",
+    letterSpacing: 0
   },
   videoCard: {
     minHeight: 104,
@@ -425,17 +1042,48 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 5
   },
+  videoKind: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
   videoTitle: {
     color: colors.text,
     fontSize: typography.body,
     fontWeight: "800",
     letterSpacing: 0
   },
-  chevron: {
-    width: 22,
-    height: 22,
+  workActions: {
+    width: 72,
+    gap: 6
+  },
+  workEditButton: {
+    minHeight: 34,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.text
+  },
+  workEditButtonText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  workDeleteButton: {
+    minWidth: 42,
+    minHeight: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  workDeleteButtonText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0
   },
   emptyState: {
     minHeight: 72,
