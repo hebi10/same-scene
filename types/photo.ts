@@ -1,0 +1,42 @@
+export type PhotoKind = "original" | "edited";
+
+export type PhotoRatioLabel = "Original" | "1:1" | "3:4" | "4:5" | "9:16" | "16:9";
+
+export type PhotoEditTransform = {
+  ratioLabel: PhotoRatioLabel;
+  translateX: number;
+  translateY: number;
+  scale: number;
+  rotation: number;
+  frameWidth?: number;
+  frameHeight?: number;
+};
+
+export type PhotoItem = {
+  id: string;
+  uri: string;
+  previewUri?: string;
+  createdAt: string;
+  width: number;
+  height: number;
+  ratioLabel: string;
+  kind: PhotoKind;
+  edited: boolean;
+  addedToVideo: boolean;
+  sourcePhotoId?: string;
+  edit?: PhotoEditTransform;
+};
+
+export type SaveCapturedPhotoInput = {
+  uri: string;
+  width?: number;
+  height?: number;
+};
+
+export type SaveEditedPhotoInput = {
+  sourceUri: string;
+  sourcePhotoId?: string;
+  width?: number;
+  height?: number;
+  transform: PhotoEditTransform;
+};

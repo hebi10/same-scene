@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "TravelFrame",
+    "slug": "travel-frame",
+    "scheme": "travelframe",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icons/app-icon.png",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.travelframe.app"
+    },
+    "android": {
+      "package": "com.travelframe.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/icons/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TravelFrame에서 구도 가이드 촬영을 하려면 카메라 접근 권한이 필요합니다.",
+          "microphonePermission": "TravelFrame에서 영상 클립을 녹화하려면 마이크 접근 권한이 필요합니다."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "TravelFrame에서 여행 사진을 선택하려면 앨범 접근 권한이 필요합니다.",
+          "savePhotosPermission": "TravelFrame에서 편집 사진과 완성 영상을 저장하려면 권한이 필요합니다."
+        }
+      ],
+      "expo-document-picker",
+      "expo-audio"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
