@@ -25,6 +25,7 @@ export type AppSettings = {
   themeMode: ThemeMode;
   fontStyle: FontStyle;
   fontSize: FontSize;
+  cloudBackupEnabled: boolean;
 };
 
 export const defaultAppSettings: AppSettings = {
@@ -37,7 +38,8 @@ export const defaultAppSettings: AppSettings = {
   exportQuality: "high",
   themeMode: "light",
   fontStyle: "compact",
-  fontSize: "medium"
+  fontSize: "medium",
+  cloudBackupEnabled: false
 };
 
 const clampGuideSize = (value: unknown) => {
@@ -65,7 +67,11 @@ const normalizeSettings = (value: Partial<AppSettings> | null): AppSettings => {
     guideColor:
       typeof nextSettings.guideColor === "string" && nextSettings.guideColor.trim()
         ? nextSettings.guideColor
-        : defaultAppSettings.guideColor
+        : defaultAppSettings.guideColor,
+    cloudBackupEnabled:
+      typeof nextSettings.cloudBackupEnabled === "boolean"
+        ? nextSettings.cloudBackupEnabled
+        : defaultAppSettings.cloudBackupEnabled
   };
 };
 

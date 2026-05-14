@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { colors } from "@/constants/app-theme";
 
 type TabGlyphProps = {
-  kind: "home" | "camera" | "studio" | "settings";
+  kind: "home" | "camera" | "studio" | "settings" | "account";
   focused: boolean;
 };
 
@@ -36,6 +36,12 @@ export function TabGlyph({ kind, focused }: TabGlyphProps) {
           <View style={[styles.settingLine, strokeStyle]} />
           <View style={[styles.settingLine, styles.settingLineShort, strokeStyle]} />
           <View style={[styles.settingLine, strokeStyle]} />
+        </View>
+      ) : null}
+      {kind === "account" ? (
+        <View style={styles.accountIcon}>
+          <View style={[styles.accountHead, strokeStyle]} />
+          <View style={[styles.accountBody, strokeStyle]} />
         </View>
       ) : null}
     </View>
@@ -117,5 +123,22 @@ const styles = StyleSheet.create({
   settingLineShort: {
     width: 10,
     alignSelf: "flex-end"
+  },
+  accountIcon: {
+    width: 16,
+    height: 16,
+    alignItems: "center"
+  },
+  accountHead: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    marginBottom: 2
+  },
+  accountBody: {
+    width: 14,
+    height: 7,
+    borderTopLeftRadius: 999,
+    borderTopRightRadius: 999
   }
 });

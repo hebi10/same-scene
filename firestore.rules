@@ -1,0 +1,71 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isCurrentUserDocument(userId) {
+      return request.resource.data.uid == userId;
+    }
+
+    function isMockSubscription() {
+      return request.resource.data.plan == "premium"
+        && request.resource.data.status == "active"
+        && request.resource.data.provider == "mock";
+    }
+
+    function isMockPaymentEvent() {
+      return request.resource.data.type == "mock_payment_completed"
+        && request.resource.data.provider == "mock"
+        && request.resource.data.plan == "premium";
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isCurrentUserDocument(userId);
+      allow update: if isOwner(userId)
+        && resource.data.uid == userId
+        && isCurrentUserDocument(userId);
+      allow delete: if false;
+
+      match /videos/{videoId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      match /imageWorks/{workId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      match /subscriptions/{subscriptionId} {
+        allow read: if isOwner(userId);
+
+        // Temporary client-side mock payment flow.
+        // Replace create/update with trusted server-only writes when real billing is added.
+        allow create, update: if isOwner(userId)
+          && subscriptionId == "current"
+          && isMockSubscription();
+
+        allow delete: if false;
+      }
+
+      match /paymentEvents/{eventId} {
+        allow read: if isOwner(userId);
+
+        // Temporary client-side mock payment flow.
+        // Real payment events should be written by Cloud Functions or a verified server.
+        allow create: if isOwner(userId) && isMockPaymentEvent();
+        allow update, delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

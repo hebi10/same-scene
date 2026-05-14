@@ -1,10 +1,14 @@
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
+  updateProfile,
   type User
-} from "@firebase/auth";
+} from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import {
   createContext,
@@ -17,15 +21,30 @@ import {
 } from "react";
 
 import { firebaseAuth, firestore, isFirebaseConfigured } from "@/lib/firebase";
+import {
+  activateMockSubscription,
+  freeSubscription,
+  getUserSubscription,
+  isPremiumSubscription,
+  type UserSubscription
+} from "@/lib/subscription";
 
 type AuthContextValue = {
   user: User | null;
+  subscription: UserSubscription;
   isLoggedIn: boolean;
+  hasFullAccess: boolean;
   isAuthLoading: boolean;
   isFirebaseReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   logOut: () => Promise<void>;
+  sendVerificationEmail: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  changePassword: (password: string) => Promise<void>;
+  updateName: (displayName: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
+  startMockSubscription: () => Promise<UserSubscription>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -36,6 +55,19 @@ const ensureFirebaseAuth = () => {
   }
 
   return firebaseAuth;
+};
+
+const hasVerifiedProvider = (user: User | null) =>
+  Boolean(user?.emailVerified) ||
+  Boolean(user?.providerData.some((provider) => provider.providerId === "google.com"));
+
+const ensureCurrentUser = () => {
+  const auth = ensureFirebaseAuth();
+  if (!auth.currentUser) {
+    throw new Error("로그인이 필요합니다.");
+  }
+
+  return auth.currentUser;
 };
 
 const ensureUserDocument = async (user: User) => {
@@ -49,9 +81,11 @@ const ensureUserDocument = async (user: User) => {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
+      emailVerified: user.emailVerified,
       providerIds: user.providerData.map((provider) => provider.providerId),
+      lastSignInAt: user.metadata.lastSignInTime ?? null,
       updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp()
+      createdAt: user.metadata.creationTime ?? serverTimestamp()
     },
     { merge: true }
   );
@@ -59,6 +93,7 @@ const ensureUserDocument = async (user: User) => {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [subscription, setSubscription] = useState<UserSubscription>(freeSubscription);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   useEffect(() => {
@@ -74,9 +109,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (nextUser) {
         try {
           await ensureUserDocument(nextUser);
+          setSubscription(await getUserSubscription(nextUser));
         } catch {
           // User profile sync should not block local app usage.
         }
+      } else {
+        setSubscription(freeSubscription);
       }
     });
   }, []);
@@ -90,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = useCallback(async (email: string, password: string) => {
     const auth = ensureFirebaseAuth();
     const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    await sendEmailVerification(credential.user);
     await ensureUserDocument(credential.user);
   }, []);
 
@@ -98,17 +137,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut(auth);
   }, []);
 
+  const sendVerificationEmail = useCallback(async () => {
+    const currentUser = ensureCurrentUser();
+    await sendEmailVerification(currentUser);
+  }, []);
+
+  const resetPassword = useCallback(async (email: string) => {
+    const auth = ensureFirebaseAuth();
+    await sendPasswordResetEmail(auth, email.trim());
+  }, []);
+
+  const changePassword = useCallback(async (password: string) => {
+    const currentUser = ensureCurrentUser();
+    await updatePassword(currentUser, password);
+  }, []);
+
+  const updateName = useCallback(async (displayName: string) => {
+    const currentUser = ensureCurrentUser();
+    await updateProfile(currentUser, {
+      displayName: displayName.trim() || null
+    });
+    await currentUser.reload();
+    await ensureUserDocument(currentUser);
+    setUser(ensureFirebaseAuth().currentUser);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const currentUser = ensureCurrentUser();
+    await currentUser.reload();
+    await ensureUserDocument(currentUser);
+    setSubscription(await getUserSubscription(currentUser));
+    setUser(ensureFirebaseAuth().currentUser);
+  }, []);
+
+  const startMockSubscription = useCallback(async () => {
+    const currentUser = ensureCurrentUser();
+    const nextSubscription = await activateMockSubscription(currentUser);
+    setSubscription(nextSubscription);
+    await ensureUserDocument(currentUser);
+    return nextSubscription;
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
+      subscription,
       isLoggedIn: Boolean(user),
+      hasFullAccess: hasVerifiedProvider(user) && isPremiumSubscription(subscription),
       isAuthLoading,
       isFirebaseReady: isFirebaseConfigured && Boolean(firebaseAuth),
       signIn,
       signUp,
-      logOut
+      logOut,
+      sendVerificationEmail,
+      resetPassword,
+      changePassword,
+      updateName,
+      refreshUser,
+      startMockSubscription
     }),
-    [isAuthLoading, logOut, signIn, signUp, user]
+    [
+      changePassword,
+      isAuthLoading,
+      logOut,
+      refreshUser,
+      resetPassword,
+      sendVerificationEmail,
+      signIn,
+      signUp,
+      startMockSubscription,
+      subscription,
+      updateName,
+      user
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

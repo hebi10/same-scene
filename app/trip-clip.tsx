@@ -83,6 +83,7 @@ import {
   updateImageBundleWork
 } from "@/lib/work-library";
 import { useAuth } from "@/lib/auth-context";
+import { backupImageBundleWork, backupMadeVideo } from "@/lib/cloud-backup";
 import type { PhotoItem } from "@/types/photo";
 
 const DEFAULT_DURATION = 2.5;
@@ -347,7 +348,7 @@ export default function TripClipScreen() {
     videoId?: string;
   }>();
   const recorder = useViewRecorder();
-  const { isLoggedIn } = useAuth();
+  const { user, isLoggedIn, hasFullAccess } = useAuth();
   const insets = useSafeAreaInsets();
   const bottomSafePadding = Math.max(insets.bottom + 12, 28);
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
@@ -378,6 +379,7 @@ export default function TripClipScreen() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>("images");
   const [imageSaveFormat, setImageSaveFormat] =
     useState<ImageSaveFormat>("original");
+  const [cloudBackupEnabled, setCloudBackupEnabled] = useState(false);
   const [workTitle, setWorkTitle] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [renderedVideoUri, setRenderedVideoUri] = useState<string | null>(null);
@@ -498,6 +500,7 @@ export default function TripClipScreen() {
     setPreviewGuideSize(settings.guideSize);
     setPreviewGuideSizeInput(String(settings.guideSize));
     setPreviewGuideColor(settings.guideColor);
+    setCloudBackupEnabled(settings.cloudBackupEnabled);
 
     if (videoId && restoredVideoIdRef.current !== videoId) {
       const storedVideo = await getMadeVideoById(videoId);
@@ -1130,21 +1133,53 @@ export default function TripClipScreen() {
           ...(normalizedWorkTitle ? { title: normalizedWorkTitle } : {})
         };
 
+        let savedBundle = null;
         if (bundleId) {
           const updatedBundle = await updateImageBundleWork(bundleId, bundlePayload);
           if (!updatedBundle) {
-            await saveImageBundleWork(bundlePayload);
+            savedBundle = await saveImageBundleWork(bundlePayload);
+          } else {
+            savedBundle = updatedBundle;
           }
         } else {
-          await saveImageBundleWork(bundlePayload);
+          savedBundle = await saveImageBundleWork(bundlePayload);
         }
 
-        setExportMessage("선택한 이미지가 핸드폰에 저장되었습니다.");
+        let backupWarning: string | null = null;
+
+        if (savedBundle && cloudBackupEnabled && user) {
+          try {
+            setExportProgress({
+              visible: true,
+              percent: 94,
+              title: "클라우드 백업 중",
+              detail: "저장한 이미지 작업을 계정에 백업하고 있습니다."
+            });
+            await backupImageBundleWork({
+              user,
+              work: savedBundle,
+              enabled: cloudBackupEnabled
+            });
+          } catch (backupError) {
+            backupWarning = getUserFacingErrorMessage(
+              backupError,
+              "클라우드 백업은 완료하지 못했습니다."
+            );
+          }
+        }
+
+        setExportMessage(
+          backupWarning
+            ? `선택한 이미지는 핸드폰에 저장되었습니다. ${backupWarning}`
+            : "선택한 이미지가 핸드폰에 저장되었습니다."
+        );
         setExportProgress({
           visible: true,
           percent: 100,
           title: "저장 완료",
-          detail: `이미지 ${selectedPhotos.length}장이 ${getImageSaveFormatLabel(imageSaveFormat)}으로 핸드폰 앨범과 작업물에 저장되었습니다.`
+          detail: backupWarning
+            ? `이미지 ${selectedPhotos.length}장은 저장됐고, 클라우드 백업은 나중에 다시 시도할 수 있습니다.`
+            : `이미지 ${selectedPhotos.length}장이 ${getImageSaveFormatLabel(imageSaveFormat)}으로 핸드폰 앨범과 작업물에 저장되었습니다.`
         });
         return;
       }
@@ -1202,12 +1237,40 @@ export default function TripClipScreen() {
               : "none",
         musicLabel: activeMusicLabel
       });
-      setExportMessage("MP4 영상이 핸드폰에 저장되었습니다.");
+      let backupWarning: string | null = null;
+
+      if (cloudBackupEnabled && user) {
+        try {
+          setExportProgress({
+            visible: true,
+            percent: 98,
+            title: "클라우드 백업 중",
+            detail: "저장한 영상을 계정에 백업하고 있습니다."
+          });
+          await backupMadeVideo({
+            user,
+            video: savedVideo,
+            enabled: cloudBackupEnabled
+          });
+        } catch (backupError) {
+          backupWarning = getUserFacingErrorMessage(
+            backupError,
+            "클라우드 백업은 완료하지 못했습니다."
+          );
+        }
+      }
+      setExportMessage(
+        backupWarning
+          ? `MP4 영상은 핸드폰에 저장되었습니다. ${backupWarning}`
+          : "MP4 영상이 핸드폰에 저장되었습니다."
+      );
       setExportProgress({
         visible: true,
         percent: 100,
         title: "저장 완료",
-        detail: "저장한 영상을 작업물 목록에서 확인할 수 있습니다.",
+        detail: backupWarning
+          ? "저장한 영상은 작업물 목록에서 확인할 수 있고, 클라우드 백업은 나중에 다시 시도할 수 있습니다."
+          : "저장한 영상을 작업물 목록에서 확인할 수 있습니다.",
         completedVideoId: savedVideo.id
       });
     } catch (error) {
@@ -1714,6 +1777,19 @@ export default function TripClipScreen() {
           <Text selectable style={styles.exportDetail}>
             저장할 형식을 선택한 뒤 바로 핸드폰 앨범에 저장하거나 공유합니다.
           </Text>
+          {!isLoggedIn ? (
+            <Text selectable style={styles.exportNotice}>
+              인증되지 않은 계정이나 비로그인 상태에서 MP4를 저장하면 트래블프레임 워터마크가 들어갑니다.
+            </Text>
+          ) : cloudBackupEnabled ? (
+            <Text selectable style={styles.exportNotice}>
+              클라우드 백업이 켜져 있어 저장한 작업물이 계정에도 백업됩니다.
+            </Text>
+          ) : (
+            <Text selectable style={styles.exportNotice}>
+              클라우드 백업은 설정에서 켤 수 있습니다. 꺼져 있으면 기기에만 저장됩니다.
+            </Text>
+          )}
           <View style={styles.exportFormatList}>
             {EXPORT_FORMAT_OPTIONS.map((option) => {
               const isActive = exportFormat === option.value;
@@ -1849,7 +1925,7 @@ export default function TripClipScreen() {
               frame={recordingFrame}
               template={template}
               transition={transition}
-              showWatermark={!isLoggedIn}
+              showWatermark={!hasFullAccess}
             />
           </RecordingView>
         </View>
@@ -3126,6 +3202,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0
   },
   exportMessage: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 17,
+    letterSpacing: 0
+  },
+  exportNotice: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
     color: colors.muted,
     fontSize: typography.small,
     lineHeight: 17,

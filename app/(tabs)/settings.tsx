@@ -41,7 +41,8 @@ type SettingKey =
   | "exportQuality"
   | "themeMode"
   | "fontStyle"
-  | "fontSize";
+  | "fontSize"
+  | "cloudBackupEnabled";
 
 const opacityOptions = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
 
@@ -203,6 +204,10 @@ export default function SettingsScreen() {
       return "폰트 크기";
     }
 
+    if (activeSetting === "cloudBackupEnabled") {
+      return "클라우드 백업";
+    }
+
     return "";
   }, [activeSetting]);
 
@@ -346,15 +351,23 @@ export default function SettingsScreen() {
             ) : null}
 
             {isFirebaseReady && isLoggedIn ? (
-              <Pressable
-                disabled={isAuthSubmitting}
-                style={[styles.authSecondaryButton, isAuthSubmitting && styles.disabledButton]}
-                onPress={() => handleAuthAction("logOut")}
-              >
-                <Text selectable={false} style={styles.authSecondaryButtonText}>
-                  로그아웃
-                </Text>
-              </Pressable>
+              <View style={styles.loggedInActions}>
+                <ActionRow
+                  label="클라우드 백업"
+                  detail="켜면 저장한 영상과 여러 사진 작업을 계정에 백업합니다."
+                  mark={settings.cloudBackupEnabled ? "켜짐" : "꺼짐"}
+                  onPress={() => setActiveSetting("cloudBackupEnabled")}
+                />
+                <Pressable
+                  disabled={isAuthSubmitting}
+                  style={[styles.authSecondaryButton, isAuthSubmitting && styles.disabledButton]}
+                  onPress={() => handleAuthAction("logOut")}
+                >
+                  <Text selectable={false} style={styles.authSecondaryButtonText}>
+                    로그아웃
+                  </Text>
+                </Pressable>
+              </View>
             ) : null}
 
             {authMessage ? (
@@ -586,6 +599,23 @@ export default function SettingsScreen() {
                     />
                   ))
                 : null}
+
+              {activeSetting === "cloudBackupEnabled" ? (
+                <>
+                  <OptionButton
+                    label="켜짐"
+                    detail="저장한 영상과 여러 사진 작업을 Firebase에 백업합니다."
+                    active={settings.cloudBackupEnabled}
+                    onPress={() => updateSetting({ cloudBackupEnabled: true })}
+                  />
+                  <OptionButton
+                    label="꺼짐"
+                    detail="사진과 영상은 기기 안에만 저장합니다."
+                    active={!settings.cloudBackupEnabled}
+                    onPress={() => updateSetting({ cloudBackupEnabled: false })}
+                  />
+                </>
+              ) : null}
             </View>
           </View>
         </View>
@@ -785,6 +815,9 @@ const styles = StyleSheet.create({
   authActions: {
     flexDirection: "row",
     gap: 8
+  },
+  loggedInActions: {
+    gap: 10
   },
   authPrimaryButton: {
     flex: 1,

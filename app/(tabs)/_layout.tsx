@@ -74,6 +74,13 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => <TabGlyph kind="settings" focused={focused} />
         }}
       />
+      <Tabs.Screen
+        name="account"
+        options={{
+          title: "계정",
+          tabBarIcon: ({ focused }) => <TabGlyph kind="account" focused={focused} />
+        }}
+      />
     </Tabs>
   );
 }
