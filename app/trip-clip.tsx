@@ -1,6 +1,7 @@
 import { Image } from "expo-image";
 import { useAudioPlayer, type AudioSource } from "expo-audio";
 import Constants from "expo-constants";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { router, type Href, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
@@ -14,11 +15,13 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
   View
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -31,6 +34,8 @@ import Reanimated, {
   useSharedValue,
   withTiming
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { RecordingView, useViewRecorder } from "react-native-view-recorder";
 
 import { TripClipPreviewPlayer } from "@/components/trip-clip-preview-player";
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
@@ -77,6 +82,7 @@ import {
   saveImageBundleWork,
   updateImageBundleWork
 } from "@/lib/work-library";
+import { useAuth } from "@/lib/auth-context";
 import type { PhotoItem } from "@/types/photo";
 
 const DEFAULT_DURATION = 2.5;
@@ -196,6 +202,19 @@ const getDefaultRenderServerUrl = () => {
 };
 
 const defaultRenderServerUrl = getDefaultRenderServerUrl();
+const VIEW_RECORDER_FPS = 24;
+const RECORDING_VIEW_WIDTH = 360;
+
+const isRecordingViewAvailable = () => {
+  if (Platform.OS === "web") {
+    return false;
+  }
+
+  return Boolean(
+    UIManager.getViewManagerConfig?.("RecordingView") ??
+      UIManager.getViewManagerConfig?.("RCTRecordingView")
+  );
+};
 
 const ratioAspect: Record<TripClipRatio, number> = {
   "9:16": 9 / 16,
@@ -205,6 +224,20 @@ const ratioAspect: Record<TripClipRatio, number> = {
   "3:4": 3 / 4
 };
 
+const recordingOutputSize: Record<TripClipRatio, { width: number; height: number }> = {
+  "9:16": { width: 720, height: 1280 },
+  "4:5": { width: 864, height: 1080 },
+  "1:1": { width: 1080, height: 1080 },
+  "16:9": { width: 1280, height: 720 },
+  "3:4": { width: 810, height: 1080 }
+};
+
+type RecordingFrame = {
+  currentPhoto: PhotoItem | null;
+  nextPhoto: PhotoItem | null;
+  transitionProgress: number;
+};
+
 const getPhotoLabel = (photo: PhotoItem) =>
   photo.kind === "edited" ? "편집 사진" : "원본 사진";
 
@@ -212,6 +245,94 @@ const getPreviewUri = (photo: PhotoItem) => photo.previewUri ?? photo.uri;
 
 const getDefaultFrameDuration = (index: number) =>
   index === 0 ? FIRST_FRAME_DURATION : DEFAULT_DURATION;
+
+const waitForPaint = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+
+const toNativeFilePath = (uri: string) => {
+  if (uri.startsWith("file:///")) {
+    return uri.replace("file://", "");
+  }
+
+  if (uri.startsWith("file:/")) {
+    return uri.replace("file:", "");
+  }
+
+  return uri;
+};
+
+const toFileUri = (pathOrUri: string) => {
+  if (pathOrUri.startsWith("file://")) {
+    return pathOrUri;
+  }
+
+  return `file://${pathOrUri}`;
+};
+
+const getRecordingFrame = ({
+  frameIndex,
+  fps,
+  photos,
+  durations,
+  transition,
+  transitionDuration
+}: {
+  frameIndex: number;
+  fps: number;
+  photos: PhotoItem[];
+  durations: Record<string, number>;
+  transition: TripClipTransition;
+  transitionDuration: number;
+}): RecordingFrame => {
+  if (photos.length === 0) {
+    return {
+      currentPhoto: null,
+      nextPhoto: null,
+      transitionProgress: 0
+    };
+  }
+
+  const seconds = frameIndex / fps;
+  let elapsed = 0;
+
+  for (let index = 0; index < photos.length; index += 1) {
+    const photo = photos[index];
+    const duration = durations[photo.id] ?? getDefaultFrameDuration(index);
+    const isLast = index === photos.length - 1;
+
+    if (seconds < elapsed + duration || isLast) {
+      const localSeconds = Math.max(0, Math.min(duration, seconds - elapsed));
+      const nextPhoto = photos[index + 1] ?? null;
+      const transitionWindow =
+        transition === "none" || !nextPhoto
+          ? 0
+          : Math.max(0.1, Math.min(transitionDuration, duration * 0.5));
+      const transitionStart = duration - transitionWindow;
+      const transitionProgress =
+        transitionWindow > 0 && localSeconds >= transitionStart
+          ? Math.max(0, Math.min(1, (localSeconds - transitionStart) / transitionWindow))
+          : 0;
+
+      return {
+        currentPhoto: photo,
+        nextPhoto: transitionProgress > 0 ? nextPhoto : null,
+        transitionProgress
+      };
+    }
+
+    elapsed += duration;
+  }
+
+  return {
+    currentPhoto: photos[photos.length - 1] ?? null,
+    nextPhoto: null,
+    transitionProgress: 0
+  };
+};
 
 const formatClipTime = (seconds: number) => {
   const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -225,6 +346,10 @@ export default function TripClipScreen() {
     bundleId?: string;
     videoId?: string;
   }>();
+  const recorder = useViewRecorder();
+  const { isLoggedIn } = useAuth();
+  const insets = useSafeAreaInsets();
+  const bottomSafePadding = Math.max(insets.bottom + 12, 28);
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [durations, setDurations] = useState<Record<string, number>>({});
@@ -263,6 +388,8 @@ export default function TripClipScreen() {
   const [isMusicComingSoonVisible, setIsMusicComingSoonVisible] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [progressSeconds, setProgressSeconds] = useState(0);
+  const [recordingFrameIndex, setRecordingFrameIndex] = useState(0);
+  const [recordingViewAvailable] = useState(isRecordingViewAvailable);
   const restoredVideoIdRef = useRef<string | null>(null);
   const restoredBundleIdRef = useRef<string | null>(null);
   const autoDurationIdsRef = useRef<Set<string>>(new Set());
@@ -307,6 +434,18 @@ export default function TripClipScreen() {
   const totalDuration = selectedIds.reduce(
     (sum, id, index) => sum + getFrameDuration(id, index),
     0
+  );
+  const recordingFrame = useMemo(
+    () =>
+      getRecordingFrame({
+        frameIndex: recordingFrameIndex,
+        fps: VIEW_RECORDER_FPS,
+        photos: selectedPhotos,
+        durations,
+        transition,
+        transitionDuration
+      }),
+    [durations, recordingFrameIndex, selectedPhotos, transition, transitionDuration]
   );
 
   const getStartTimeForIndex = useCallback(
@@ -815,6 +954,62 @@ export default function TripClipScreen() {
     }
   };
 
+  const recordTripClipVideo = async (
+    onProgress?: (percent: number, detail: string) => void
+  ) => {
+    if (!recordingViewAvailable) {
+      throw new Error(
+        "MP4 저장 기능이 현재 앱에 연결되지 않았습니다. 최신 Android 개발 빌드를 설치한 뒤 다시 시도해 주세요."
+      );
+    }
+
+    if (!FileSystem.cacheDirectory) {
+      throw new Error("영상 파일을 만들 임시 저장소를 찾지 못했습니다.");
+    }
+
+    const totalFrames = Math.max(1, Math.ceil(totalDuration * VIEW_RECORDER_FPS));
+    const outputSize = recordingOutputSize[ratio];
+    const outputUri = `${FileSystem.cacheDirectory}trip-clip-${Date.now()}.mp4`;
+    const output = toNativeFilePath(outputUri);
+
+    await preloadSelectedPreviewImages();
+    setRecordingFrameIndex(0);
+    await waitForPaint();
+    onProgress?.(12, "기기 안에서 영상 저장을 준비하고 있습니다.");
+
+    const recordedPath = await recorder.record({
+      output,
+      fps: VIEW_RECORDER_FPS,
+      totalFrames,
+      width: outputSize.width,
+      height: outputSize.height,
+      codec: "h264",
+      quality: 0.92,
+      keyFrameInterval: 1,
+      onFrame: async ({ frameIndex }) => {
+        setRecordingFrameIndex(frameIndex);
+        await waitForPaint();
+      },
+      onProgress: ({ framesEncoded }) => {
+        const percent = 12 + Math.round((framesEncoded / totalFrames) * 70);
+        onProgress?.(
+          Math.min(82, percent),
+          `기기 안에서 MP4 영상을 만들고 있습니다. ${framesEncoded}/${totalFrames}`
+        );
+      }
+    });
+
+    onProgress?.(84, "완성된 MP4 영상을 저장할 준비를 하고 있습니다.");
+    const recordedUri = toFileUri(recordedPath);
+    const fileInfo = await FileSystem.getInfoAsync(recordedUri);
+
+    if (!fileInfo.exists) {
+      throw new Error("MP4 파일 생성은 완료됐지만 저장할 파일을 찾지 못했습니다.");
+    }
+
+    return recordedUri;
+  };
+
   const renderMp4Video = async (onProgress?: (percent: number, detail: string) => void) => {
     if (renderedVideoUri) {
       return renderedVideoUri;
@@ -823,6 +1018,28 @@ export default function TripClipScreen() {
     if (selectedPhotos.length === 0) {
       setExportMessage("내보내기 전에 사진을 선택해 주세요.");
       return null;
+    }
+
+    if (Platform.OS !== "web") {
+      try {
+        const localUri = await recordTripClipVideo(onProgress);
+        setRenderedVideoUri(localUri);
+        return localUri;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error ?? "");
+
+        if (
+          message.includes("Native module not linked") ||
+          message.includes("ViewRecorder") ||
+          message.includes("TurboModule")
+        ) {
+          throw new Error(
+            "react-native-view-recorder가 현재 앱에 연결되지 않았습니다. EAS Android 개발 빌드를 설치한 뒤 다시 실행해 주세요."
+          );
+        }
+
+        throw error;
+      }
     }
 
     if (!renderServerUrl.trim()) {
@@ -863,7 +1080,7 @@ export default function TripClipScreen() {
   };
 
   const saveSelectedExport = async () => {
-    if (exportFormat === "mp4" && !DIRECT_EXPORT_ENABLED) {
+    if (exportFormat === "mp4" && Platform.OS === "web" && !DIRECT_EXPORT_ENABLED) {
       setIsExportComingSoonVisible(true);
       return;
     }
@@ -929,9 +1146,6 @@ export default function TripClipScreen() {
           title: "저장 완료",
           detail: `이미지 ${selectedPhotos.length}장이 ${getImageSaveFormatLabel(imageSaveFormat)}으로 핸드폰 앨범과 작업물에 저장되었습니다.`
         });
-        setTimeout(() => {
-          router.replace("/studio?tab=works" as Href);
-        }, 650);
         return;
       }
 
@@ -996,9 +1210,6 @@ export default function TripClipScreen() {
         detail: "저장한 영상을 작업물 목록에서 확인할 수 있습니다.",
         completedVideoId: savedVideo.id
       });
-      setTimeout(() => {
-        router.replace("/studio?tab=works" as Href);
-      }, 650);
     } catch (error) {
       const message = getUserFacingErrorMessage(error, "저장하지 못했습니다.");
       setExportMessage(message);
@@ -1033,7 +1244,7 @@ export default function TripClipScreen() {
         return;
       }
 
-      if (!DIRECT_EXPORT_ENABLED) {
+      if (Platform.OS === "web" && !DIRECT_EXPORT_ENABLED) {
         setIsExportComingSoonVisible(true);
         return;
       }
@@ -1056,7 +1267,10 @@ export default function TripClipScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         style={styles.screen}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: spacing.section + bottomSafePadding }
+        ]}
       >
       <View style={styles.header}>
         <Text selectable style={styles.eyebrow}>
@@ -1074,7 +1288,7 @@ export default function TripClipScreen() {
           </Text>
           <TextInput
             value={workTitle}
-            placeholder="이미지 묶음 이름"
+            placeholder="영상 만들기 이름"
             placeholderTextColor={colors.faint}
             style={styles.workTitleInput}
             onChangeText={setWorkTitle}
@@ -1588,7 +1802,7 @@ export default function TripClipScreen() {
               onPress={saveSelectedExport}
             >
               <Text selectable={false} style={styles.primaryButtonText}>
-                {exportFormat === "mp4" && !DIRECT_EXPORT_ENABLED
+                {exportFormat === "mp4" && Platform.OS === "web" && !DIRECT_EXPORT_ENABLED
                   ? "준비중"
                   : isExporting
                     ? "저장 중"
@@ -1619,7 +1833,33 @@ export default function TripClipScreen() {
       </Section>
       ) : null}
       </ScrollView>
-      <View style={styles.bottomEditorTabs}>
+      {recordingViewAvailable ? (
+        <View pointerEvents="none" style={styles.recordingHost}>
+          <RecordingView
+            sessionId={recorder.sessionId}
+            style={[
+              styles.recordingView,
+              {
+                width: RECORDING_VIEW_WIDTH,
+                aspectRatio: ratioAspect[ratio]
+              }
+            ]}
+          >
+            <TripClipRecordingCanvas
+              frame={recordingFrame}
+              template={template}
+              transition={transition}
+              showWatermark={!isLoggedIn}
+            />
+          </RecordingView>
+        </View>
+      ) : null}
+      <View
+        style={[
+          styles.bottomEditorTabs,
+          { paddingBottom: bottomSafePadding }
+        ]}
+      >
         {EDITOR_TABS.map((tab) => {
           const isLocked = tab.value !== "photos" && selectedPhotos.length === 0;
           const isActive = activeEditorTab === tab.value;
@@ -1664,11 +1904,13 @@ export default function TripClipScreen() {
         }}
       >
         <View style={styles.exportModalBackdrop}>
-          <View
+          <ScrollView
             style={[
               styles.exportModalPanel,
               exportProgress.error && styles.exportModalPanelError
             ]}
+            contentContainerStyle={styles.exportModalContent}
+            showsVerticalScrollIndicator={false}
           >
             <Text style={styles.exportModalTitle}>
               {exportProgress.title}
@@ -1742,7 +1984,7 @@ export default function TripClipScreen() {
                 </Pressable>
               </View>
             ) : null}
-          </View>
+          </ScrollView>
         </View>
       </Modal>
       <Modal
@@ -1799,6 +2041,72 @@ export default function TripClipScreen() {
           </View>
         </View>
       </Modal>
+    </View>
+  );
+}
+
+function TripClipRecordingCanvas({
+  frame,
+  template,
+  transition,
+  showWatermark
+}: {
+  frame: RecordingFrame;
+  template: TripClipTemplate;
+  transition: TripClipTransition;
+  showWatermark: boolean;
+}) {
+  const isFilm = template === "film-log";
+  const isCenter = template === "center-cut";
+  const contentFit = isFilm || isCenter ? "contain" : "cover";
+  const progress = frame.transitionProgress;
+  const nextLayerStyle =
+    transition === "slide"
+      ? { opacity: progress > 0 ? 1 : 0, transform: [{ translateX: (1 - progress) * 44 }] }
+      : transition === "zoom"
+        ? { opacity: progress > 0 ? 1 : 0, transform: [{ scale: 1.08 - progress * 0.08 }] }
+        : { opacity: transition === "fade" ? progress : progress > 0 ? 1 : 0 };
+
+  return (
+    <View style={[styles.recordingCanvasInner, isFilm && styles.recordingCanvasFilm]}>
+      {frame.currentPhoto ? (
+        <View style={styles.recordingLayer}>
+          <Image
+            source={{ uri: getPreviewUri(frame.currentPhoto) }}
+            style={[styles.recordingImage, isFilm && styles.recordingImageFilm]}
+            contentFit={contentFit}
+            cachePolicy="memory-disk"
+          />
+        </View>
+      ) : null}
+      {frame.nextPhoto ? (
+        <View style={[styles.recordingLayer, styles.recordingNextLayer, nextLayerStyle]}>
+          <Image
+            source={{ uri: getPreviewUri(frame.nextPhoto) }}
+            style={[styles.recordingImage, isFilm && styles.recordingImageFilm]}
+            contentFit={contentFit}
+            cachePolicy="memory-disk"
+          />
+        </View>
+      ) : null}
+      {isFilm ? (
+        <View style={styles.recordingFilmMeta}>
+          <Text selectable={false} style={styles.recordingFilmText}>
+            트래블프레임
+          </Text>
+          <Text selectable={false} style={styles.recordingFilmText}>
+            구도 편집
+          </Text>
+        </View>
+      ) : null}
+      {isCenter ? <View style={styles.recordingCenterGuide} /> : null}
+      {showWatermark ? (
+        <View style={styles.recordingWatermark}>
+          <Text selectable={false} style={styles.recordingWatermarkText}>
+            트래블프레임
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1927,6 +2235,76 @@ const styles = StyleSheet.create({
   screenRoot: {
     flex: 1,
     backgroundColor: colors.background
+  },
+  recordingHost: {
+    position: "absolute",
+    top: 0,
+    left: -10000,
+    width: RECORDING_VIEW_WIDTH,
+    zIndex: -1
+  },
+  recordingView: {
+    overflow: "hidden",
+    backgroundColor: colors.ink
+  },
+  recordingCanvasInner: {
+    flex: 1,
+    overflow: "hidden",
+    backgroundColor: colors.ink
+  },
+  recordingCanvasFilm: {
+    padding: 22
+  },
+  recordingLayer: {
+    ...StyleSheet.absoluteFillObject
+  },
+  recordingNextLayer: {
+    zIndex: 2
+  },
+  recordingImage: {
+    width: "100%",
+    height: "100%"
+  },
+  recordingImageFilm: {
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.22)"
+  },
+  recordingFilmMeta: {
+    position: "absolute",
+    left: 22,
+    right: 22,
+    bottom: 12,
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  recordingFilmText: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  recordingCenterGuide: {
+    position: "absolute",
+    left: "50%",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.42)",
+    pointerEvents: "none"
+  },
+  recordingWatermark: {
+    position: "absolute",
+    right: 18,
+    bottom: 18,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.52)"
+  },
+  recordingWatermarkText: {
+    color: colors.inverse,
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0
   },
   screen: {
     flex: 1,
@@ -2759,17 +3137,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 18,
     paddingVertical: 24,
-    backgroundColor: "transparent"
+    backgroundColor: "rgba(0, 0, 0, 0.36)"
   },
   exportModalPanel: {
     width: "92%",
     maxWidth: 360,
-    gap: 12,
-    padding: 18,
+    maxHeight: "78%",
     borderWidth: 1,
     borderColor: colors.text,
     backgroundColor: colors.background,
-    overflow: "hidden"
+    overflow: "visible"
+  },
+  exportModalContent: {
+    gap: 12,
+    padding: 18
   },
   exportModalPanelError: {
     gap: 12,
@@ -2887,3 +3268,4 @@ const styles = StyleSheet.create({
     color: colors.inverse
   }
 });
+

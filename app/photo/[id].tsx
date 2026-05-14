@@ -224,7 +224,7 @@ export default function PhotoDetailScreen() {
           onPress={toggleVideoSelection}
         >
           <Text selectable={false} style={styles.lightButtonText}>
-            {photo.addedToVideo ? "여행 클립에서 제외" : "여행 클립에 추가"}
+            {photo.addedToVideo ? "영상 만들기에서 제외" : "영상 만들기에 추가"}
           </Text>
         </Pressable>
         <Pressable
@@ -232,7 +232,7 @@ export default function PhotoDetailScreen() {
           onPress={() => router.push("/trip-clip")}
         >
           <Text selectable={false} style={styles.lightButtonText}>
-            여행 클립 열기
+            영상 만들기 열기
           </Text>
         </Pressable>
         <Pressable

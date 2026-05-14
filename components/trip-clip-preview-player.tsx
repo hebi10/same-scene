@@ -249,7 +249,7 @@ export function TripClipPreviewPlayer({
             {formatDate(photo.createdAt)}
           </Text>
           <Text selectable style={styles.filmText}>
-            TRAVELFRAME
+            트래블프레임
           </Text>
         </View>
       ) : null}
@@ -336,3 +336,4 @@ const styles = StyleSheet.create({
     pointerEvents: "none"
   }
 });
+

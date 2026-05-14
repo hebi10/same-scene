@@ -277,17 +277,17 @@ export default function StudioScreen() {
 
       {activeTab === "edit" ? (
         <>
-          <SectionBlock title="여러 사진 작업">
+          <SectionBlock title="영상 만들기">
             <Pressable
               style={({ pressed }) => [styles.clipCta, pressed && styles.pressed]}
               onPress={() => router.push("/trip-clip")}
             >
               <View style={styles.clipCopy}>
                 <Text selectable style={styles.clipTitle}>
-                  여행 클립 / 이미지 묶음 만들기
+                  영상 만들기
                 </Text>
                 <Text selectable style={styles.clipDetail}>
-                  여러 사진을 선택해 순서, 비율, 음악을 정하고 이미지 묶음이나 클립 작업으로 저장합니다.
+                  여러 사진을 선택해 순서, 비율, 음악을 정하고 영상으로 저장합니다.
                 </Text>
               </View>
               <View style={styles.clipAction}>
@@ -339,8 +339,8 @@ export default function StudioScreen() {
                 onPageChange={(page) => setSectionPage("singleImages", page)}
               />
               <WorkSection
-                title="이미지 묶음"
-                emptyDetail="여러 사진을 이미지로 저장하면 이곳에 표시됩니다."
+                title="영상 만들기 작업"
+                emptyDetail="영상 만들기에서 저장한 이미지 작업이 이곳에 표시됩니다."
                 items={imageBundleWorks}
                 page={pages.imageBundles ?? 0}
                 pageSize={pageSize}
@@ -363,7 +363,7 @@ export default function StudioScreen() {
             <SectionBlock title="작업물">
               <EmptyState
                 title="아직 작업물이 없습니다."
-                detail="단일 이미지 편집, 이미지 묶음, 여행 클립을 저장하면 이곳에 표시됩니다."
+                detail="단일 이미지 편집, 영상 만들기 작업, 저장한 영상이 이곳에 표시됩니다."
               />
             </SectionBlock>
           )}
@@ -730,7 +730,7 @@ function WorkCard({
         onPress={() => router.push(`/trip-clip?bundleId=${bundle.id}` as Href)}
       >
         <Text selectable style={styles.videoKind}>
-          이미지 묶음
+          영상 만들기 작업
         </Text>
         <Text selectable style={styles.videoTitle}>
           {bundle.title}

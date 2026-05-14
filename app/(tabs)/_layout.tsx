@@ -1,9 +1,14 @@
 import { Tabs } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TabGlyph } from "@/components/tab-glyph";
 import { colors } from "@/constants/app-theme";
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+  const tabBarBottomPadding = Math.max(insets.bottom + 10, 18);
+  const tabBarHeight = 72 + tabBarBottomPadding;
+
   return (
     <Tabs
       screenOptions={{
@@ -18,9 +23,9 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.text,
         tabBarInactiveTintColor: colors.faint,
         tabBarStyle: {
-          height: 86,
+          height: tabBarHeight,
           paddingTop: 8,
-          paddingBottom: 20,
+          paddingBottom: tabBarBottomPadding,
           backgroundColor: colors.background,
           borderTopColor: colors.line
         },
@@ -29,7 +34,7 @@ export default function TabsLayout() {
           marginBottom: 2
         },
         tabBarItemStyle: {
-          minHeight: 56,
+          minHeight: 54,
           paddingVertical: 3
         },
         tabBarLabelStyle: {

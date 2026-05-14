@@ -328,36 +328,26 @@ export const saveEditedPhoto = async ({
   sourcePhotoId,
   width,
   height,
-  transform
+  transform,
+  renderedUri,
+  renderedWidth,
+  renderedHeight
 }: SaveEditedPhotoInput) => {
   const id = createPhotoId();
   const directory = await ensurePhotoDirectory();
   const destinationUri = `${directory}${id}-edited.jpg`;
-  const rotateDegrees = normalizeDegrees(transform.rotation);
-  const safeWidth = width ?? 1;
-  const safeHeight = height ?? 1;
-  const rotatedSize = getRotatedSize(safeWidth, safeHeight, rotateDegrees);
-  const actions: Action[] = [];
-
-  if (rotateDegrees !== 0) {
-    actions.push({ rotate: rotateDegrees });
-  }
-
-  const cropAction = getCropAction({
-    width: rotatedSize.width,
-    height: rotatedSize.height,
-    transform
-  });
-
-  if (cropAction) {
-    actions.push(cropAction);
-  }
-
-  const settings = await getAppSettings();
-  const rendered = await manipulateAsync(sourceUri, actions, {
-    compress: getExportQualityCompression(settings.exportQuality),
-    format: SaveFormat.JPEG
-  });
+  const rendered = renderedUri
+    ? {
+        uri: renderedUri,
+        width: renderedWidth ?? width ?? 0,
+        height: renderedHeight ?? height ?? 0
+      }
+    : await renderEditedPhotoFromTransform({
+        sourceUri,
+        width,
+        height,
+        transform
+      });
 
   await FileSystem.copyAsync({
     from: rendered.uri,
@@ -392,6 +382,44 @@ export const saveEditedPhoto = async ({
   const photos = await getPhotos();
   await writePhotos([photo, ...photos]);
   return photo;
+};
+
+const renderEditedPhotoFromTransform = async ({
+  sourceUri,
+  width,
+  height,
+  transform
+}: {
+  sourceUri: string;
+  width?: number;
+  height?: number;
+  transform: PhotoEditTransform;
+}) => {
+  const rotateDegrees = normalizeDegrees(transform.rotation);
+  const safeWidth = width ?? 1;
+  const safeHeight = height ?? 1;
+  const rotatedSize = getRotatedSize(safeWidth, safeHeight, rotateDegrees);
+  const actions: Action[] = [];
+
+  if (rotateDegrees !== 0) {
+    actions.push({ rotate: rotateDegrees });
+  }
+
+  const cropAction = getCropAction({
+    width: rotatedSize.width,
+    height: rotatedSize.height,
+    transform
+  });
+
+  if (cropAction) {
+    actions.push(cropAction);
+  }
+
+  const settings = await getAppSettings();
+  return manipulateAsync(sourceUri, actions, {
+    compress: getExportQualityCompression(settings.exportQuality),
+    format: SaveFormat.JPEG
+  });
 };
 
 export const deletePhoto = async (id: string) => {

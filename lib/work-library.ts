@@ -56,7 +56,7 @@ export const saveImageBundleWork = async (
     id: createWorkId(),
     kind: "image-bundle",
     createdAt: new Date().toISOString(),
-    title: item.title ?? `이미지 묶음 ${items.length + 1}`
+    title: item.title ?? `영상 만들기 ${items.length + 1}`
   };
 
   await writeImageBundles([savedItem, ...items]);

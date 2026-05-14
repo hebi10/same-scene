@@ -137,6 +137,7 @@ export default function CameraScreen() {
   const [overlayLocked, setOverlayLocked] = useState(false);
   const [overlayResetKey, setOverlayResetKey] = useState(0);
   const insets = useSafeAreaInsets();
+  const bottomSafePadding = Math.max(insets.bottom + 10, 24);
   const isCameraModalOpen = guideSettingsOpen || cameraSettingsOpen || navigationOpen;
 
   useEffect(() => {
@@ -462,7 +463,7 @@ export default function CameraScreen() {
 
       <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
         <Text selectable={false} style={styles.brand}>
-          TravelFrame
+          트래블프레임
         </Text>
         <View style={styles.cameraMenuWrap}>
           <Pressable
@@ -922,7 +923,7 @@ export default function CameraScreen() {
       </Modal>
 
       {!isCameraModalOpen ? (
-      <View style={[styles.controls, { paddingBottom: insets.bottom + 10 }]}>
+      <View style={[styles.controls, { paddingBottom: bottomSafePadding }]}>
         {errorMessage ? (
           <Text selectable style={styles.errorText}>
             {errorMessage}
@@ -1902,3 +1903,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0
   }
 });
+

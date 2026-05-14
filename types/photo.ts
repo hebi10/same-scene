@@ -39,4 +39,7 @@ export type SaveEditedPhotoInput = {
   width?: number;
   height?: number;
   transform: PhotoEditTransform;
+  renderedUri?: string;
+  renderedWidth?: number;
+  renderedHeight?: number;
 };

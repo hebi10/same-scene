@@ -1,36 +1,56 @@
 {
   "expo": {
-    "name": "사진 가이드",
+    "name": "트래블프레임",
     "slug": "photo-guide",
     "scheme": "photoguide",
-    "description": "사진 구도를 맞추고 쇼츠·릴스용 콘텐츠 제작을 돕는 촬영 가이드 앱입니다.",
-    "version": "1.0.0",
+    "description": "여행 사진의 구도를 맞추고 쇼츠·릴스용 콘텐츠 제작을 돕는 촬영 가이드 앱입니다.",
+    "version": "1.0.1",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "orientation": "portrait",
     "icon": "./assets/icons/app-icon.png",
+    "splash": {
+      "image": "./assets/icons/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111111"
+    },
+    "newArchEnabled": true,
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.haebi.photoguide",
       "buildNumber": "1",
       "infoPlist": {
-        "NSCameraUsageDescription": "사진 가이드에서 구도 가이드 촬영을 위해 카메라 접근 권한이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "사진 가이드에서 기준 사진을 불러오고 편집하기 위해 사진 보관함 접근 권한이 필요합니다.",
-        "NSPhotoLibraryAddUsageDescription": "사진 가이드에서 촬영 사진과 편집 결과를 저장하기 위해 사진 저장 권한이 필요합니다."
+        "NSCameraUsageDescription": "트래블프레임에서 구도 가이드 촬영을 위해 카메라 접근 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "트래블프레임에서 기준 사진을 불러오고 편집하기 위해 사진 보관함 접근 권한이 필요합니다.",
+        "NSPhotoLibraryAddUsageDescription": "트래블프레임에서 촬영 사진과 편집 결과를 저장하기 위해 사진 저장 권한이 필요합니다."
       }
     },
     "android": {
       "package": "com.haebi.photoguide",
-      "versionCode": 1,
+      "versionCode": 2,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icons/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
+        "backgroundColor": "#111111"
+      },
+      "splash": {
+        "image": "./assets/icons/splash-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#111111"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -42,7 +62,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "사진 가이드에서 구도 가이드 촬영을 위해 카메라 접근 권한이 필요합니다.",
+          "cameraPermission": "트래블프레임에서 구도 가이드 촬영을 위해 카메라 접근 권한이 필요합니다.",
           "microphonePermission": false,
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": false
@@ -51,16 +71,16 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "사진 가이드에서 기준 사진을 불러오고 편집하기 위해 사진 보관함 접근 권한이 필요합니다.",
-          "cameraPermission": "사진 가이드에서 사진 촬영 기능을 사용하기 위해 카메라 접근 권한이 필요합니다.",
+          "photosPermission": "트래블프레임에서 기준 사진을 불러오고 편집하기 위해 사진 보관함 접근 권한이 필요합니다.",
+          "cameraPermission": "트래블프레임에서 사진 촬영 기능을 사용하기 위해 카메라 접근 권한이 필요합니다.",
           "microphonePermission": false
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "사진 가이드에서 기준 사진을 불러오고 편집하기 위해 사진 보관함 접근 권한이 필요합니다.",
-          "savePhotosPermission": "사진 가이드에서 촬영 사진과 편집 결과를 저장하기 위해 사진 저장 권한이 필요합니다.",
+          "photosPermission": "트래블프레임에서 기준 사진을 불러오고 편집하기 위해 사진 보관함 접근 권한이 필요합니다.",
+          "savePhotosPermission": "트래블프레임에서 촬영 사진과 편집 결과를 저장하기 위해 사진 저장 권한이 필요합니다.",
           "isAccessMediaLocationEnabled": false,
           "granularPermissions": [
             "photo",
@@ -81,6 +101,13 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "privacyPolicyUrl": "https://sevim0104.cafe24.com/privacy/index.html",
+      "eas": {
+        "projectId": "36ca0ec3-771c-4cd9-9700-4610ea87edb9"
+      }
     }
   }
 }

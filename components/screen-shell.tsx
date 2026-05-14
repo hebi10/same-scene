@@ -13,6 +13,8 @@ import {
   type FontStyle
 } from "@/lib/app-settings";
 
+const TAB_BAR_RESERVED_HEIGHT = 104;
+
 type ScreenShellProps = {
   eyebrow?: string;
   title: string;
@@ -62,7 +64,7 @@ export function ScreenShell({
         styles.content,
         {
           paddingTop: safeTop ? insets.top + spacing.screen : spacing.screen,
-          paddingBottom: insets.bottom + spacing.section * 2
+          paddingBottom: insets.bottom + TAB_BAR_RESERVED_HEIGHT
         }
       ]}
     >

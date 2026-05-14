@@ -83,6 +83,7 @@ export default function EditScreen() {
   const { photoId } = useLocalSearchParams<{ photoId?: string }>();
   const canvasRef = useRef<EditablePhotoCanvasHandle>(null);
   const insets = useSafeAreaInsets();
+  const bottomSafePadding = Math.max(insets.bottom + 14, 28);
   const [source, setSource] = useState<EditableSource | null>(null);
   const [sourcePhoto, setSourcePhoto] = useState<PhotoItem | null>(null);
   const [ratio, setRatio] = useState<PhotoRatioLabel>("Original");
@@ -342,12 +343,19 @@ export default function EditScreen() {
     try {
       setIsSaving(true);
       setMessage(null);
+      const transform =
+        canvasRef.current?.getTransform() ?? getFallbackTransform(ratio);
+      const renderedImage = await canvasRef.current?.captureEditedImage();
+
       await saveEditedPhoto({
         sourceUri: source.uri,
         sourcePhotoId: source.sourcePhotoId,
         width: source.width,
         height: source.height,
-        transform: canvasRef.current?.getTransform() ?? getFallbackTransform(ratio)
+        transform,
+        renderedUri: renderedImage?.uri,
+        renderedWidth: renderedImage?.width,
+        renderedHeight: renderedImage?.height
       });
 
       await clearEditDraft();
@@ -402,7 +410,7 @@ export default function EditScreen() {
         )}
       </View>
 
-      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 14 }]}>
+      <View style={[styles.bottomPanel, { paddingBottom: bottomSafePadding }]}>
         {availableDraft && showDraftPrompt ? (
           <View style={styles.draftPanel}>
             <View style={styles.draftCopy}>

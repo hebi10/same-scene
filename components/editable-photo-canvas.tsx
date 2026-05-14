@@ -1,11 +1,13 @@
 import { Image } from "expo-image";
+import * as FileSystem from "expo-file-system/legacy";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, UIManager, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useAnimatedStyle,
   useSharedValue
 } from "react-native-reanimated";
+import { RecordingView, useViewRecorder } from "react-native-view-recorder";
 
 import { CameraGuideOverlay } from "@/components/camera-guide-overlay";
 import { colors } from "@/constants/app-theme";
@@ -28,6 +30,7 @@ export type EditablePhotoCanvasHandle = {
   reset: () => void;
   rotateRight: () => void;
   fillFrame: () => void;
+  captureEditedImage: () => Promise<{ uri: string; width: number; height: number }>;
   getTransform: () => PhotoEditTransform;
 };
 
@@ -40,6 +43,99 @@ const ratioValue: Record<PhotoRatioLabel, number | null> = {
   "4:5": 4 / 5,
   "9:16": 9 / 16,
   "16:9": 16 / 9
+};
+
+const SNAPSHOT_MAX_EDGE = 1800;
+
+const isRecordingViewAvailable = () => {
+  if (Platform.OS === "web") {
+    return false;
+  }
+
+  return Boolean(
+    UIManager.getViewManagerConfig?.("RecordingView") ??
+      UIManager.getViewManagerConfig?.("RCTRecordingView")
+  );
+};
+
+const waitForPaint = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+
+const toNativeFilePath = (uri: string) => {
+  if (uri.startsWith("file:///")) {
+    return uri.replace("file://", "");
+  }
+
+  if (uri.startsWith("file:/")) {
+    return uri.replace("file:", "");
+  }
+
+  return uri;
+};
+
+const toFileUri = (pathOrUri: string) => {
+  if (pathOrUri.startsWith("file://")) {
+    return pathOrUri;
+  }
+
+  return `file://${pathOrUri}`;
+};
+
+const getSnapshotSize = ({
+  ratio,
+  originalAspectRatio
+}: {
+  ratio: PhotoRatioLabel;
+  originalAspectRatio?: number;
+}) => {
+  const aspectRatio = ratio === "Original"
+    ? originalAspectRatio ?? 4 / 5
+    : ratioValue[ratio] ?? 4 / 5;
+
+  if (aspectRatio >= 1) {
+    return {
+      width: SNAPSHOT_MAX_EDGE,
+      height: Math.max(1, Math.round(SNAPSHOT_MAX_EDGE / aspectRatio))
+    };
+  }
+
+  return {
+    width: Math.max(1, Math.round(SNAPSHOT_MAX_EDGE * aspectRatio)),
+    height: SNAPSHOT_MAX_EDGE
+  };
+};
+
+const getRatioAspect = (ratio: PhotoRatioLabel, originalAspectRatio?: number) =>
+  ratio === "Original" ? originalAspectRatio ?? 4 / 5 : ratioValue[ratio] ?? 4 / 5;
+
+const getContainedFrameSize = ({
+  containerWidth,
+  containerHeight,
+  aspectRatio
+}: {
+  containerWidth: number;
+  containerHeight: number;
+  aspectRatio: number;
+}) => {
+  const maxWidth = Math.max(1, containerWidth - 28);
+  const maxHeight = Math.max(1, containerHeight - 28);
+  const containerAspectRatio = maxWidth / maxHeight;
+
+  if (containerAspectRatio > aspectRatio) {
+    return {
+      width: Math.round(maxHeight * aspectRatio),
+      height: Math.round(maxHeight)
+    };
+  }
+
+  return {
+    width: Math.round(maxWidth),
+    height: Math.round(maxWidth / aspectRatio)
+  };
 };
 
 export const EditablePhotoCanvas = forwardRef<
@@ -56,7 +152,11 @@ export const EditablePhotoCanvas = forwardRef<
   guideSize,
   guideColor
 }, ref) {
+  const recorder = useViewRecorder();
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
+  const [recordingViewAvailable] = useState(isRecordingViewAvailable);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
@@ -124,6 +224,51 @@ export const EditablePhotoCanvas = forwardRef<
       rotation.value += Math.PI / 2;
     },
     fillFrame,
+    captureEditedImage: async () => {
+      if (!recordingViewAvailable) {
+        throw new Error(
+          "편집 이미지 저장 기능이 현재 앱에 연결되지 않았습니다. 최신 Android 개발 빌드를 설치한 뒤 다시 시도해 주세요."
+        );
+      }
+
+      if (!FileSystem.cacheDirectory) {
+        throw new Error("편집 이미지를 만들 임시 저장소를 찾지 못했습니다.");
+      }
+
+      const snapshotSize = getSnapshotSize({
+        ratio,
+        originalAspectRatio
+      });
+      const outputUri = `${FileSystem.cacheDirectory}edited-photo-${Date.now()}.jpg`;
+      const output = toNativeFilePath(outputUri);
+
+      setIsCapturingSnapshot(true);
+      await waitForPaint();
+
+      try {
+        const path = await recorder.snapshot({
+          output,
+          format: "jpg",
+          quality: 1,
+          width: snapshotSize.width,
+          height: snapshotSize.height
+        });
+        const uri = toFileUri(path);
+        const fileInfo = await FileSystem.getInfoAsync(uri);
+
+        if (!fileInfo.exists) {
+          throw new Error("편집 이미지 생성은 완료됐지만 저장할 파일을 찾지 못했습니다.");
+        }
+
+        return {
+          uri,
+          width: snapshotSize.width,
+          height: snapshotSize.height
+        };
+      } finally {
+        setIsCapturingSnapshot(false);
+      }
+    },
     getTransform: () => ({
       ratioLabel: ratio,
       translateX: Number(translateX.value.toFixed(2)),
@@ -172,26 +317,8 @@ export const EditablePhotoCanvas = forwardRef<
     ]
   }));
 
-  return (
-    <View style={styles.stage}>
-      <View
-        style={[
-          styles.frame,
-          {
-            aspectRatio:
-              ratio === "Original"
-                ? originalAspectRatio ?? 4 / 5
-                : ratioValue[ratio] ?? 4 / 5
-          }
-        ]}
-        onLayout={(event) => {
-          const { width, height } = event.nativeEvent.layout;
-          setFrameSize({
-            width: Number(width.toFixed(2)),
-            height: Number(height.toFixed(2))
-          });
-        }}
-      >
+  const frameContent = (
+    <>
         {uri ? (
           <GestureDetector gesture={composedGesture}>
             <AnimatedImage
@@ -204,13 +331,67 @@ export const EditablePhotoCanvas = forwardRef<
           <View style={styles.emptyFrame} />
         )}
 
-        <CameraGuideOverlay
-          guide={guide}
-          visible={guideVisible}
-          size={guideSize}
-          color={guideColor}
-        />
-      </View>
+        {!isCapturingSnapshot ? (
+          <CameraGuideOverlay
+            guide={guide}
+            visible={guideVisible}
+            size={guideSize}
+            color={guideColor}
+          />
+        ) : null}
+    </>
+  );
+  const frameAspectRatio = getRatioAspect(ratio, originalAspectRatio);
+  const containedFrameSize =
+    stageSize.width && stageSize.height
+      ? getContainedFrameSize({
+          containerWidth: stageSize.width,
+          containerHeight: stageSize.height,
+          aspectRatio: frameAspectRatio
+        })
+      : null;
+  const frameStyle = [
+    styles.frame,
+    isCapturingSnapshot && styles.frameCapturing,
+    containedFrameSize ?? {
+      width: "100%" as const,
+      aspectRatio: frameAspectRatio
+    }
+  ];
+  const handleStageLayout = (event: {
+    nativeEvent: { layout: { width: number; height: number } };
+  }) => {
+    const { width, height } = event.nativeEvent.layout;
+    setStageSize({
+      width: Number(width.toFixed(2)),
+      height: Number(height.toFixed(2))
+    });
+  };
+  const handleFrameLayout = (event: {
+    nativeEvent: { layout: { width: number; height: number } };
+  }) => {
+    const { width, height } = event.nativeEvent.layout;
+    setFrameSize({
+      width: Number(width.toFixed(2)),
+      height: Number(height.toFixed(2))
+    });
+  };
+
+  return (
+    <View style={styles.stage} onLayout={handleStageLayout}>
+      {recordingViewAvailable ? (
+        <RecordingView
+          sessionId={recorder.sessionId}
+          style={frameStyle}
+          onLayout={handleFrameLayout}
+        >
+          {frameContent}
+        </RecordingView>
+      ) : (
+        <View style={frameStyle} onLayout={handleFrameLayout}>
+          {frameContent}
+        </View>
+      )}
     </View>
   );
 });
@@ -224,12 +405,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ink
   },
   frame: {
-    width: "100%",
-    maxHeight: "100%",
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.32)",
     backgroundColor: colors.text
+  },
+  frameCapturing: {
+    borderWidth: 0
   },
   image: {
     width: "100%",

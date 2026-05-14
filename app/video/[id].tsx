@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { router, type Href, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { Stack, router, type Href, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useCallback, useState } from "react";
 import {
@@ -65,88 +65,101 @@ export default function VideoDetailScreen() {
     }, [loadVideo])
   );
 
+  const headerTitle = video?.title ?? "만든 영상";
+
   if (isLoading) {
     return (
-      <View style={styles.centerScreen}>
-        <ActivityIndicator color={colors.text} />
-      </View>
+      <>
+        <Stack.Screen options={{ title: "만든 영상" }} />
+        <View style={styles.centerScreen}>
+          <ActivityIndicator color={colors.text} />
+        </View>
+      </>
     );
   }
 
   if (!video) {
     return (
-      <View style={styles.centerScreen}>
-        <Text selectable style={styles.emptyTitle}>
-          영상을 찾을 수 없습니다.
-        </Text>
-        <Pressable style={styles.darkButton} onPress={() => router.replace("/studio")}>
-          <Text selectable={false} style={styles.darkButtonText}>
-            편집으로 돌아가기
+      <>
+        <Stack.Screen options={{ title: "만든 영상" }} />
+        <View style={styles.centerScreen}>
+          <Text selectable style={styles.emptyTitle}>
+            영상을 찾을 수 없습니다.
           </Text>
-        </Pressable>
-      </View>
+          <Pressable style={styles.darkButton} onPress={() => router.replace("/studio")}>
+            <Text selectable={false} style={styles.darkButtonText}>
+              편집으로 돌아가기
+            </Text>
+          </Pressable>
+        </View>
+      </>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      contentInsetAdjustmentBehavior="automatic"
-    >
-      <View style={[styles.videoFrame, { aspectRatio: video.ratio === "16:9" ? 16 / 9 : 9 / 16 }]}>
-        <VideoView
-          player={player}
-          style={styles.video}
-          fullscreenOptions={{ enable: true }}
-          allowsPictureInPicture
-        />
-      </View>
-
-      <View style={styles.header}>
-        <Text selectable style={styles.eyebrow}>
-          만든 영상
-        </Text>
-        <Text selectable style={styles.title}>
-          {video.title}
-        </Text>
-        <Text selectable style={styles.detail}>
-          {formatDate(video.createdAt)}
-        </Text>
-      </View>
-
-      <View style={styles.metaPanel}>
-        <MetaRow label="비율" value={video.ratio} />
-        <MetaRow label="길이" value={formatDuration(video.duration)} />
-        <MetaRow label="사진" value={`${video.photoIds.length}장`} />
-        <MetaRow label="음악" value={video.musicLabel} />
-      </View>
-
-      {video.coverUri ? (
-        <Image source={{ uri: video.coverUri }} style={styles.coverImage} contentFit="cover" />
-      ) : null}
-
-      <View style={styles.actions}>
-        <Pressable
-          style={styles.darkButton}
-          onPress={() => router.push(`/trip-clip?videoId=${video.id}` as Href)}
+    <>
+      <Stack.Screen options={{ title: headerTitle }} />
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        contentInsetAdjustmentBehavior="automatic"
+      >
+        <View
+          style={[styles.videoFrame, { aspectRatio: video.ratio === "16:9" ? 16 / 9 : 9 / 16 }]}
         >
-          <Text selectable={false} style={styles.darkButtonText}>
-            다시 편집하기
+          <VideoView
+            player={player}
+            style={styles.video}
+            fullscreenOptions={{ enable: true }}
+            allowsPictureInPicture
+          />
+        </View>
+
+        <View style={styles.header}>
+          <Text selectable style={styles.eyebrow}>
+            만든 영상
           </Text>
-        </Pressable>
-        <Pressable style={styles.lightButton} onPress={() => router.back()}>
-          <Text selectable={false} style={styles.lightButtonText}>
-            돌아가기
+          <Text selectable style={styles.title}>
+            {video.title}
           </Text>
-        </Pressable>
-        {message ? (
-          <Text selectable style={styles.message}>
-            {message}
+          <Text selectable style={styles.detail}>
+            {formatDate(video.createdAt)}
           </Text>
+        </View>
+
+        <View style={styles.metaPanel}>
+          <MetaRow label="비율" value={video.ratio} />
+          <MetaRow label="길이" value={formatDuration(video.duration)} />
+          <MetaRow label="사진" value={`${video.photoIds.length}장`} />
+          <MetaRow label="음악" value={video.musicLabel} />
+        </View>
+
+        {video.coverUri ? (
+          <Image source={{ uri: video.coverUri }} style={styles.coverImage} contentFit="cover" />
         ) : null}
-      </View>
-    </ScrollView>
+
+        <View style={styles.actions}>
+          <Pressable
+            style={styles.darkButton}
+            onPress={() => router.push(`/trip-clip?videoId=${video.id}` as Href)}
+          >
+            <Text selectable={false} style={styles.darkButtonText}>
+              다시 편집하기
+            </Text>
+          </Pressable>
+          <Pressable style={styles.lightButton} onPress={() => router.back()}>
+            <Text selectable={false} style={styles.lightButtonText}>
+              돌아가기
+            </Text>
+          </Pressable>
+          {message ? (
+            <Text selectable style={styles.message}>
+              {message}
+            </Text>
+          ) : null}
+        </View>
+      </ScrollView>
+    </>
   );
 }
 

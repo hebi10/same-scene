@@ -1,6 +1,14 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from "react-native";
 
 import { ActionRow } from "@/components/action-row";
 import { ScreenShell } from "@/components/screen-shell";
@@ -21,6 +29,7 @@ import {
   type FontStyle,
   type ThemeMode
 } from "@/lib/app-settings";
+import { useAuth } from "@/lib/auth-context";
 
 type SettingKey =
   | "defaultGuide"
@@ -115,9 +124,24 @@ const fontSizeLabel: Record<FontSize, string> = {
   large: "크게"
 };
 
+const PRIVACY_POLICY_URL = "https://sevim0104.cafe24.com/privacy/index.html";
+
 export default function SettingsScreen() {
+  const {
+    user,
+    isLoggedIn,
+    isAuthLoading,
+    isFirebaseReady,
+    signIn,
+    signUp,
+    logOut
+  } = useAuth();
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
   const [activeSetting, setActiveSetting] = useState<SettingKey | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -192,6 +216,55 @@ export default function SettingsScreen() {
     setActiveSetting(null);
   };
 
+  const handleAuthAction = async (mode: "signIn" | "signUp" | "logOut") => {
+    if (isAuthSubmitting) {
+      return;
+    }
+
+    try {
+      setIsAuthSubmitting(true);
+      setAuthMessage(null);
+
+      if (mode === "logOut") {
+        await logOut();
+        setAuthPassword("");
+        setAuthMessage("로그아웃했습니다.");
+        return;
+      }
+
+      if (!authEmail.trim() || authPassword.length < 6) {
+        setAuthMessage("이메일과 6자리 이상 비밀번호를 입력해 주세요.");
+        return;
+      }
+
+      if (mode === "signIn") {
+        await signIn(authEmail, authPassword);
+        setAuthMessage("로그인했습니다.");
+      } else {
+        await signUp(authEmail, authPassword);
+        setAuthMessage("회원가입과 로그인을 완료했습니다.");
+      }
+      setAuthPassword("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setAuthMessage(
+        message.includes("auth/email-already-in-use")
+          ? "이미 가입된 이메일입니다."
+          : message.includes("auth/invalid-credential") ||
+              message.includes("auth/wrong-password") ||
+              message.includes("auth/user-not-found")
+            ? "이메일 또는 비밀번호를 확인해 주세요."
+            : message.includes("auth/invalid-email")
+              ? "이메일 형식을 확인해 주세요."
+              : message.includes("Firebase 연결 정보")
+                ? "Firebase 연결 정보가 아직 설정되지 않았습니다."
+                : "로그인 처리 중 문제가 발생했습니다."
+      );
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  };
+
   return (
     <>
       <ScreenShell
@@ -200,6 +273,98 @@ export default function SettingsScreen() {
         description="가이드, 오버레이, 저장 품질과 화면 스타일을 관리합니다."
         safeTop
       >
+        <SectionBlock title="계정">
+          <View style={styles.accountPanel}>
+            <View style={styles.accountHeader}>
+              <View style={styles.accountCopy}>
+                <Text selectable style={styles.accountTitle}>
+                  {isLoggedIn ? "로그인됨" : "비로그인 사용 중"}
+                </Text>
+                <Text selectable style={styles.accountDetail}>
+                  {isLoggedIn
+                    ? `${user?.email ?? "계정"}으로 전체 기능을 사용할 수 있습니다.`
+                    : "비로그인 상태에서는 무료 기능과 워터마크가 적용됩니다."}
+                </Text>
+              </View>
+              <View style={[styles.accountBadge, isLoggedIn && styles.accountBadgeActive]}>
+                <Text
+                  selectable={false}
+                  style={[styles.accountBadgeText, isLoggedIn && styles.accountBadgeTextActive]}
+                >
+                  {isLoggedIn ? "전체" : "무료"}
+                </Text>
+              </View>
+            </View>
+
+            {!isFirebaseReady ? (
+              <Text selectable style={styles.accountNotice}>
+                Firebase 웹 앱 config를 .env에 넣으면 로그인 기능이 활성화됩니다.
+              </Text>
+            ) : null}
+
+            {isFirebaseReady && !isLoggedIn ? (
+              <View style={styles.authForm}>
+                <TextInput
+                  value={authEmail}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  placeholder="이메일"
+                  placeholderTextColor={colors.faint}
+                  style={styles.authInput}
+                  onChangeText={setAuthEmail}
+                />
+                <TextInput
+                  value={authPassword}
+                  secureTextEntry
+                  placeholder="비밀번호 6자리 이상"
+                  placeholderTextColor={colors.faint}
+                  style={styles.authInput}
+                  onChangeText={setAuthPassword}
+                />
+                <View style={styles.authActions}>
+                  <Pressable
+                    disabled={isAuthLoading || isAuthSubmitting}
+                    style={[styles.authPrimaryButton, isAuthSubmitting && styles.disabledButton]}
+                    onPress={() => handleAuthAction("signIn")}
+                  >
+                    <Text selectable={false} style={styles.authPrimaryButtonText}>
+                      로그인
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isAuthLoading || isAuthSubmitting}
+                    style={[styles.authSecondaryButton, isAuthSubmitting && styles.disabledButton]}
+                    onPress={() => handleAuthAction("signUp")}
+                  >
+                    <Text selectable={false} style={styles.authSecondaryButtonText}>
+                      회원가입
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            {isFirebaseReady && isLoggedIn ? (
+              <Pressable
+                disabled={isAuthSubmitting}
+                style={[styles.authSecondaryButton, isAuthSubmitting && styles.disabledButton]}
+                onPress={() => handleAuthAction("logOut")}
+              >
+                <Text selectable={false} style={styles.authSecondaryButtonText}>
+                  로그아웃
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {authMessage ? (
+              <Text selectable style={styles.authMessage}>
+                {authMessage}
+              </Text>
+            ) : null}
+          </View>
+        </SectionBlock>
+
         <SectionBlock title="앱">
           <ActionRow
             label="화면 모드"
@@ -220,6 +385,12 @@ export default function SettingsScreen() {
             onPress={() => setActiveSetting("fontSize")}
           />
           <ActionRow label="화면 구성" detail="선, 여백, 타이포 중심의 정돈된 스타일" mark="간결" />
+          <ActionRow
+            label="개인정보처리방침"
+            detail="권한 사용과 데이터 처리 안내"
+            mark="열기"
+            onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
+          />
         </SectionBlock>
 
         <SectionBlock title="가이드">
@@ -540,5 +711,116 @@ const styles = StyleSheet.create({
   optionMarkActive: {
     borderColor: colors.inverse,
     backgroundColor: colors.inverse
+  },
+  accountPanel: {
+    gap: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: colors.background
+  },
+  accountHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  accountCopy: {
+    flex: 1,
+    gap: 5
+  },
+  accountTitle: {
+    color: colors.text,
+    fontSize: typography.section,
+    fontWeight: "900",
+    lineHeight: 21,
+    letterSpacing: 0
+  },
+  accountDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+    letterSpacing: 0
+  },
+  accountBadge: {
+    minHeight: 28,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  accountBadgeActive: {
+    borderColor: colors.text,
+    backgroundColor: colors.text
+  },
+  accountBadgeText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  accountBadgeTextActive: {
+    color: colors.inverse
+  },
+  accountNotice: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+    letterSpacing: 0
+  },
+  authForm: {
+    gap: 8
+  },
+  authInput: {
+    minHeight: controls.height,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: "700",
+    letterSpacing: 0,
+    backgroundColor: colors.background
+  },
+  authActions: {
+    flexDirection: "row",
+    gap: 8
+  },
+  authPrimaryButton: {
+    flex: 1,
+    minHeight: controls.height,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.text
+  },
+  authPrimaryButtonText: {
+    color: colors.inverse,
+    fontSize: typography.button,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  authSecondaryButton: {
+    flex: 1,
+    minHeight: controls.height,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: colors.background
+  },
+  authSecondaryButtonText: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  disabledButton: {
+    opacity: 0.45
+  },
+  authMessage: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+    letterSpacing: 0
   }
 });
