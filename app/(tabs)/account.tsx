@@ -2,6 +2,8 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,10 +14,21 @@ import {
 import { ScreenShell } from "@/components/screen-shell";
 import { SectionBlock } from "@/components/section-block";
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
+import {
+  DELETE_ACCOUNT_REQUEST_URL,
+  PRIVACY_POLICY_URL
+} from "@/constants/legal-links";
 import { useAuth } from "@/lib/auth-context";
 import { getPhotos } from "@/lib/photo-library";
 import { getMadeVideos } from "@/lib/video-library";
 import { getImageBundleWorks } from "@/lib/work-library";
+import {
+  deleteUserMusicTrack,
+  pickAndUploadUserMusicTrack,
+  syncUserMusicTracks,
+  USER_MUSIC_LIMIT,
+  type UserMusicTrack
+} from "@/lib/user-music";
 
 type AuthMode = "signIn" | "signUp" | "recover";
 
@@ -74,8 +87,16 @@ const getAuthErrorMessage = (error: unknown) => {
     return "비밀번호는 6자리 이상으로 입력해 주세요.";
   }
 
-  if (message.includes("Firebase 연결 정보")) {
+  if (message.includes("Firebase 연결 정보") || message.includes("Firebase Storage")) {
     return "Firebase 연결 정보가 아직 설정되지 않았습니다.";
+  }
+
+  if (message.includes("최대 3개")) {
+    return "내 음악은 최대 3개까지 저장할 수 있습니다.";
+  }
+
+  if (message.includes("로그인 후 내 음악")) {
+    return "로그인 후 내 음악을 관리할 수 있습니다.";
   }
 
   return "계정 처리 중 문제가 발생했습니다.";
@@ -90,6 +111,7 @@ export default function AccountScreen() {
     isAuthLoading,
     isFirebaseReady,
     signIn,
+    signInWithGoogleIdToken,
     signUp,
     logOut,
     sendVerificationEmail,
@@ -106,17 +128,24 @@ export default function AccountScreen() {
   const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
+  const [isMusicSubmitting, setIsMusicSubmitting] = useState(false);
   const [stats, setStats] = useState<UsageStats>(initialStats);
+  const [musicTracks, setMusicTracks] = useState<UserMusicTrack[]>([]);
+  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
+  const isGoogleReady = Boolean(googleWebClientId && googleAndroidClientId);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
 
       const loadStats = async () => {
-        const [photos, videos, imageBundles] = await Promise.all([
+        const [photos, videos, imageBundles, userMusicTracks] = await Promise.all([
           getPhotos(),
           getMadeVideos(),
-          getImageBundleWorks()
+          getImageBundleWorks(),
+          user ? syncUserMusicTracks(user) : Promise.resolve([])
         ]);
 
         if (!isActive) {
@@ -129,6 +158,7 @@ export default function AccountScreen() {
           imageBundles: imageBundles.length,
           videos: videos.length
         });
+        setMusicTracks(userMusicTracks);
       };
 
       loadStats();
@@ -136,7 +166,7 @@ export default function AccountScreen() {
       return () => {
         isActive = false;
       };
-    }, [])
+    }, [user])
   );
 
   const providerText = useMemo(() => {
@@ -204,9 +234,63 @@ export default function AccountScreen() {
   };
 
   const handleGoogleSignIn = () => {
-    setMessage(
-      "구글 로그인은 expo-auth-session과 Google OAuth Client ID가 필요합니다. 현재 패키지 설치가 네트워크 제한으로 완료되지 않아 버튼만 준비되어 있습니다."
-    );
+    if (!isGoogleReady) {
+      setMessage("Google 로그인 설정값을 확인해 주세요.");
+      return;
+    }
+
+    const runGoogleLogin = async () => {
+      setIsGoogleSubmitting(true);
+      setMessage(null);
+
+      const AuthSession = await import("expo-auth-session");
+      const request = new AuthSession.AuthRequest({
+        clientId: Platform.OS === "android" ? googleAndroidClientId! : googleWebClientId!,
+        responseType: AuthSession.ResponseType.IdToken,
+        redirectUri: "com.haebi.photoguide:/oauthredirect",
+        scopes: ["openid", "profile", "email"],
+        usePKCE: false,
+        extraParams: {
+          nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          prompt: "select_account"
+        }
+      });
+      const result = await request.promptAsync({
+        authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth"
+      });
+
+      if (result.type === "success") {
+        const idToken = result.params.id_token;
+        if (!idToken) {
+          throw new Error("Google 로그인 토큰을 받지 못했습니다.");
+        }
+
+        await signInWithGoogleIdToken(idToken);
+        setMessage("Google 계정으로 로그인했습니다.");
+        return;
+      }
+
+      if (result.type === "cancel" || result.type === "dismiss") {
+        setMessage("Google 로그인을 취소했습니다.");
+        return;
+      }
+
+      throw new Error("Google 로그인 중 문제가 발생했습니다.");
+    };
+
+    runGoogleLogin().catch((error) => {
+      setIsGoogleSubmitting(false);
+      const message = error instanceof Error ? error.message : String(error);
+      setMessage(
+        message.includes("ExpoWebBrowser") ||
+          message.includes("native module") ||
+          message.includes("Cannot find native module")
+          ? "Google 로그인 모듈이 현재 앱 빌드에 포함되지 않았습니다. Android 개발 빌드를 다시 만든 뒤 시도해 주세요."
+          : getAuthErrorMessage(error)
+      );
+    }).finally(() => {
+      setIsGoogleSubmitting(false);
+    });
   };
 
   const handleChangePassword = () => {
@@ -234,6 +318,42 @@ export default function AccountScreen() {
     runAuthAction(async () => {
       await startMockSubscription();
     }, "테스트 결제가 완료되었습니다. Firestore에 결제 기록을 저장했습니다.");
+  };
+
+  const handleUploadMusic = async () => {
+    if (isMusicSubmitting) {
+      return;
+    }
+
+    try {
+      setIsMusicSubmitting(true);
+      setMessage(null);
+      const nextTracks = await pickAndUploadUserMusicTrack(user);
+      setMusicTracks(nextTracks);
+      setMessage("내 음악을 저장했습니다. 영상 만들기에서 선택할 수 있습니다.");
+    } catch (error) {
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setIsMusicSubmitting(false);
+    }
+  };
+
+  const handleDeleteMusic = async (track: UserMusicTrack) => {
+    if (isMusicSubmitting) {
+      return;
+    }
+
+    try {
+      setIsMusicSubmitting(true);
+      setMessage(null);
+      const nextTracks = await deleteUserMusicTrack({ user, track });
+      setMusicTracks(nextTracks);
+      setMessage("내 음악을 삭제했습니다.");
+    } catch (error) {
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setIsMusicSubmitting(false);
+    }
   };
 
   return (
@@ -330,12 +450,15 @@ export default function AccountScreen() {
               </Text>
             </Pressable>
             <Pressable
-              disabled={isSubmitting || isAuthLoading}
-              style={[styles.secondaryButton, (isSubmitting || isAuthLoading) && styles.disabledButton]}
+              disabled={isSubmitting || isAuthLoading || isGoogleSubmitting}
+              style={[
+                styles.secondaryButton,
+                (isSubmitting || isAuthLoading || isGoogleSubmitting) && styles.disabledButton
+              ]}
               onPress={handleGoogleSignIn}
             >
               <Text selectable={false} style={styles.secondaryButtonText}>
-                Google로 계속하기
+                {isGoogleSubmitting ? "Google 로그인 중" : "Google로 계속하기"}
               </Text>
             </Pressable>
           </View>
@@ -477,6 +600,62 @@ export default function AccountScreen() {
             </View>
           </SectionBlock>
 
+          <SectionBlock title="내 음악 관리">
+            <View style={styles.musicPanel}>
+              <Text selectable style={styles.helpText}>
+                핸드폰에 있는 음악을 최대 {USER_MUSIC_LIMIT}개까지 저장하고 영상 만들기에서 사용할 수 있습니다.
+              </Text>
+              <View style={styles.musicHeader}>
+                <Text selectable style={styles.musicCount}>
+                  {musicTracks.length} / {USER_MUSIC_LIMIT}
+                </Text>
+                <Pressable
+                  disabled={isMusicSubmitting || musicTracks.length >= USER_MUSIC_LIMIT}
+                  style={[
+                    styles.secondaryButton,
+                    styles.musicUploadButton,
+                    (isMusicSubmitting || musicTracks.length >= USER_MUSIC_LIMIT) &&
+                      styles.disabledButton
+                  ]}
+                  onPress={handleUploadMusic}
+                >
+                  <Text selectable={false} style={styles.secondaryButtonText}>
+                    음악 추가
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.musicList}>
+                {musicTracks.length > 0 ? (
+                  musicTracks.map((track) => (
+                    <View key={track.id} style={styles.musicItem}>
+                      <View style={styles.musicCopy}>
+                        <Text selectable style={styles.musicTitle}>
+                          {track.name}
+                        </Text>
+                        <Text selectable style={styles.musicDetail}>
+                          {formatDateTime(track.createdAt)}
+                        </Text>
+                      </View>
+                      <Pressable
+                        disabled={isMusicSubmitting}
+                        style={[styles.musicDeleteButton, isMusicSubmitting && styles.disabledButton]}
+                        onPress={() => handleDeleteMusic(track)}
+                      >
+                        <Text selectable={false} style={styles.musicDeleteText}>
+                          삭제
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ))
+                ) : (
+                  <Text selectable style={styles.helpText}>
+                    아직 저장한 음악이 없습니다.
+                  </Text>
+                )}
+              </View>
+            </View>
+          </SectionBlock>
+
           <SectionBlock title="계정 관리">
             <View style={styles.form}>
               <TextInput
@@ -519,6 +698,22 @@ export default function AccountScreen() {
               >
                 <Text selectable={false} style={styles.primaryButtonText}>
                   로그아웃
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
+              >
+                <Text selectable={false} style={styles.secondaryButtonText}>
+                  개인정보처리방침
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => Linking.openURL(DELETE_ACCOUNT_REQUEST_URL)}
+              >
+                <Text selectable={false} style={styles.secondaryButtonText}>
+                  계정 및 데이터 삭제 요청
                 </Text>
               </Pressable>
             </View>
@@ -828,6 +1023,69 @@ const styles = StyleSheet.create({
   statLabel: {
     color: colors.muted,
     fontSize: typography.small,
+    fontWeight: "800",
+    letterSpacing: 0
+  },
+  musicPanel: {
+    gap: 12
+  },
+  musicHeader: {
+    minHeight: controls.height,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  musicCount: {
+    color: colors.text,
+    fontSize: typography.section,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  musicUploadButton: {
+    minWidth: 112
+  },
+  musicList: {
+    gap: 8
+  },
+  musicItem: {
+    minHeight: 70,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  musicCopy: {
+    flex: 1,
+    gap: 5
+  },
+  musicTitle: {
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  musicDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+    letterSpacing: 0
+  },
+  musicDeleteButton: {
+    minWidth: 64,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  musicDeleteText: {
+    color: colors.text,
+    fontSize: typography.button,
     fontWeight: "800",
     letterSpacing: 0
   },

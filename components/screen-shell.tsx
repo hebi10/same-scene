@@ -1,17 +1,12 @@
 import type { ReactNode } from "react";
-import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, spacing, typography } from "@/constants/app-theme";
+import { spacing, typography } from "@/constants/app-theme";
 import {
-  defaultAppSettings,
-  getFontSizeScale,
-  getAppSettings,
-  type FontSize,
   type FontStyle
 } from "@/lib/app-settings";
+import { useAppAppearance } from "@/lib/app-appearance";
 
 const TAB_BAR_RESERVED_HEIGHT = 104;
 
@@ -31,46 +26,27 @@ export function ScreenShell({
   children
 }: ScreenShellProps) {
   const insets = useSafeAreaInsets();
-  const [fontStyle, setFontStyle] = useState<FontStyle>(defaultAppSettings.fontStyle);
-  const [fontSize, setFontSize] = useState<FontSize>(defaultAppSettings.fontSize);
-
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-
-      const loadSettings = async () => {
-        const settings = await getAppSettings();
-        if (isActive) {
-          setFontStyle(settings.fontStyle);
-          setFontSize(settings.fontSize);
-        }
-      };
-
-      loadSettings();
-
-      return () => {
-        isActive = false;
-      };
-    }, [])
-  );
-
-  const sizeScale = getFontSizeScale(fontSize);
+  const { settings, palette, fontSizeScale, layoutScale } = useAppAppearance();
+  const screenPadding = Math.round(spacing.screen * layoutScale);
+  const sectionGap = Math.round(spacing.section * layoutScale);
 
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
-      style={styles.screen}
+      style={[styles.screen, { backgroundColor: palette.background }]}
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: safeTop ? insets.top + spacing.screen : spacing.screen,
+          padding: screenPadding,
+          gap: sectionGap,
+          paddingTop: safeTop ? insets.top + screenPadding : screenPadding,
           paddingBottom: insets.bottom + TAB_BAR_RESERVED_HEIGHT
         }
       ]}
     >
       <View style={styles.header}>
         {eyebrow ? (
-          <Text selectable style={styles.eyebrow}>
+          <Text selectable style={[styles.eyebrow, { color: palette.muted }]}>
             {eyebrow}
           </Text>
         ) : null}
@@ -78,7 +54,8 @@ export function ScreenShell({
           selectable
           style={[
             styles.title,
-            getTitleStyle(fontStyle, sizeScale)
+            { color: palette.text },
+            getTitleStyle(settings.fontStyle, fontSizeScale)
           ]}
         >
           {title}
@@ -89,8 +66,9 @@ export function ScreenShell({
             style={[
               styles.description,
               {
-                fontSize: Math.round(typography.body * sizeScale),
-                lineHeight: Math.round(21 * sizeScale)
+                color: palette.muted,
+                fontSize: Math.round(typography.body * fontSizeScale),
+                lineHeight: Math.round(21 * fontSizeScale)
               }
             ]}
           >
@@ -105,34 +83,27 @@ export function ScreenShell({
 
 const styles = StyleSheet.create({
   screen: {
-    flex: 1,
-    backgroundColor: colors.background
+    flex: 1
   },
   content: {
-    padding: spacing.screen,
-    gap: spacing.section,
-    paddingTop: spacing.screen,
     paddingBottom: spacing.section * 2
   },
   header: {
     gap: 12
   },
   eyebrow: {
-    color: colors.muted,
     fontSize: typography.eyebrow,
     fontWeight: "800",
     letterSpacing: 0,
     textTransform: "uppercase"
   },
   title: {
-    color: colors.text,
     fontSize: typography.title,
     fontWeight: "800",
     lineHeight: 36,
     letterSpacing: 0
   },
   description: {
-    color: colors.muted,
     fontSize: typography.body,
     lineHeight: 21,
     letterSpacing: 0

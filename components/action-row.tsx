@@ -2,7 +2,8 @@ import { Link, type Href } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ChevronIcon } from "@/components/chevron-icon";
-import { colors, controls, typography } from "@/constants/app-theme";
+import { controls, typography } from "@/constants/app-theme";
+import { useAppAppearance } from "@/lib/app-appearance";
 
 type ActionRowProps = {
   href?: Href;
@@ -13,26 +14,57 @@ type ActionRowProps = {
 };
 
 export function ActionRow({ href, label, detail, mark = ">", onPress }: ActionRowProps) {
+  const { palette, fontSizeScale, layoutScale } = useAppAppearance();
   const content = (
     <Pressable
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.row,
+        {
+          minHeight: Math.round(96 * layoutScale),
+          paddingVertical: Math.round(15 * layoutScale),
+          paddingHorizontal: Math.round(14 * layoutScale),
+          borderColor: palette.line,
+          backgroundColor: palette.background
+        },
+        pressed && styles.pressed
+      ]}
       onPress={onPress}
     >
       <View style={styles.copy}>
-        <Text selectable style={styles.label}>
+        <Text
+          selectable
+          style={[
+            styles.label,
+            {
+              color: palette.text,
+              fontSize: Math.round(typography.body * fontSizeScale),
+              lineHeight: Math.round(21 * fontSizeScale)
+            }
+          ]}
+        >
           {label}
         </Text>
         {detail ? (
-          <Text selectable style={styles.detail}>
+          <Text
+            selectable
+            style={[
+              styles.detail,
+              {
+                color: palette.muted,
+                fontSize: Math.round(typography.small * fontSizeScale),
+                lineHeight: Math.round(18 * fontSizeScale)
+              }
+            ]}
+          >
             {detail}
           </Text>
         ) : null}
       </View>
-      <View style={styles.markBox}>
+      <View style={[styles.markBox, { backgroundColor: palette.text }]}>
         {mark === ">" ? (
-          <ChevronIcon size={10} />
+          <ChevronIcon color={palette.inverse} size={10} />
         ) : (
-          <Text selectable={false} style={styles.markText}>
+          <Text selectable={false} style={[styles.markText, { color: palette.inverse }]}>
             {mark}
           </Text>
         )}
@@ -53,13 +85,8 @@ export function ActionRow({ href, label, detail, mark = ">", onPress }: ActionRo
 
 const styles = StyleSheet.create({
   row: {
-    minHeight: 96,
-    paddingVertical: 15,
-    paddingHorizontal: 14,
     gap: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.background
+    borderWidth: 1
   },
   pressed: {
     opacity: 0.55
@@ -68,14 +95,12 @@ const styles = StyleSheet.create({
     gap: 4
   },
   label: {
-    color: colors.text,
     fontSize: typography.body,
     fontWeight: "800",
     lineHeight: 21,
     letterSpacing: 0
   },
   detail: {
-    color: colors.muted,
     fontSize: typography.small,
     lineHeight: 18,
     letterSpacing: 0
@@ -83,11 +108,9 @@ const styles = StyleSheet.create({
   markBox: {
     minHeight: controls.compactHeight,
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.text
+    justifyContent: "center"
   },
   markText: {
-    color: colors.inverse,
     fontSize: typography.button,
     fontWeight: "800",
     textAlign: "center",

@@ -4,11 +4,13 @@ import type { GuideType } from "@/constants/camera-guides";
 import type { TripClipRatio } from "@/constants/trip-clip";
 
 const APP_SETTINGS_KEY = "travel-frame.settings.v1";
+const settingsListeners = new Set<(settings: AppSettings) => void>();
 
 export type ExportQuality = "standard" | "high" | "max";
 export type ThemeMode = "light" | "dark" | "system";
 export type FontStyle = "standard" | "compact" | "bold";
 export type FontSize = "small" | "medium" | "large";
+export type ScreenLayout = "compact" | "balanced" | "comfortable";
 
 export const GUIDE_SIZE_MIN = 24;
 export const GUIDE_SIZE_MAX = 86;
@@ -25,6 +27,7 @@ export type AppSettings = {
   themeMode: ThemeMode;
   fontStyle: FontStyle;
   fontSize: FontSize;
+  screenLayout: ScreenLayout;
   cloudBackupEnabled: boolean;
 };
 
@@ -39,8 +42,16 @@ export const defaultAppSettings: AppSettings = {
   themeMode: "light",
   fontStyle: "compact",
   fontSize: "medium",
+  screenLayout: "compact",
   cloudBackupEnabled: false
 };
+
+const themeModes: ThemeMode[] = ["light", "dark", "system"];
+const fontStyles: FontStyle[] = ["standard", "compact", "bold"];
+const fontSizes: FontSize[] = ["small", "medium", "large"];
+const screenLayouts: ScreenLayout[] = ["compact", "balanced", "comfortable"];
+const exportQualities: ExportQuality[] = ["standard", "high", "max"];
+const tripClipRatios: TripClipRatio[] = ["9:16", "4:5", "1:1", "16:9", "3:4"];
 
 const clampGuideSize = (value: unknown) => {
   const parsedValue = Number(value);
@@ -68,6 +79,24 @@ const normalizeSettings = (value: Partial<AppSettings> | null): AppSettings => {
       typeof nextSettings.guideColor === "string" && nextSettings.guideColor.trim()
         ? nextSettings.guideColor
         : defaultAppSettings.guideColor,
+    defaultRatio: tripClipRatios.includes(nextSettings.defaultRatio)
+      ? nextSettings.defaultRatio
+      : defaultAppSettings.defaultRatio,
+    exportQuality: exportQualities.includes(nextSettings.exportQuality)
+      ? nextSettings.exportQuality
+      : defaultAppSettings.exportQuality,
+    themeMode: themeModes.includes(nextSettings.themeMode)
+      ? nextSettings.themeMode
+      : defaultAppSettings.themeMode,
+    fontStyle: fontStyles.includes(nextSettings.fontStyle)
+      ? nextSettings.fontStyle
+      : defaultAppSettings.fontStyle,
+    fontSize: fontSizes.includes(nextSettings.fontSize)
+      ? nextSettings.fontSize
+      : defaultAppSettings.fontSize,
+    screenLayout: screenLayouts.includes(nextSettings.screenLayout)
+      ? nextSettings.screenLayout
+      : defaultAppSettings.screenLayout,
     cloudBackupEnabled:
       typeof nextSettings.cloudBackupEnabled === "boolean"
         ? nextSettings.cloudBackupEnabled
@@ -90,8 +119,10 @@ export const getAppSettings = async () => {
 };
 
 export const saveAppSettings = async (settings: AppSettings) => {
-  await AsyncStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
-  return settings;
+  const normalizedSettings = normalizeSettings(settings);
+  await AsyncStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(normalizedSettings));
+  settingsListeners.forEach((listener) => listener(normalizedSettings));
+  return normalizedSettings;
 };
 
 export const updateAppSettings = async (updates: Partial<AppSettings>) => {
@@ -100,6 +131,13 @@ export const updateAppSettings = async (updates: Partial<AppSettings>) => {
     ...current,
     ...updates
   });
+};
+
+export const subscribeAppSettings = (listener: (settings: AppSettings) => void) => {
+  settingsListeners.add(listener);
+  return () => {
+    settingsListeners.delete(listener);
+  };
 };
 
 export const getExportQualityCompression = (quality: ExportQuality) => {
@@ -133,6 +171,18 @@ export const getFontSizeScale = (fontSize: FontSize) => {
 
   if (fontSize === "large") {
     return 1.1;
+  }
+
+  return 1;
+};
+
+export const getScreenLayoutScale = (layout: ScreenLayout) => {
+  if (layout === "balanced") {
+    return 1.08;
+  }
+
+  if (layout === "comfortable") {
+    return 1.18;
   }
 
   return 1;

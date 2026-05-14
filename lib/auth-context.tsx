@@ -1,9 +1,11 @@
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithCredential,
   signOut,
   updatePassword,
   updateProfile,
@@ -37,6 +39,7 @@ type AuthContextValue = {
   isAuthLoading: boolean;
   isFirebaseReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogleIdToken: (idToken: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   logOut: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
@@ -125,6 +128,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await ensureUserDocument(credential.user);
   }, []);
 
+  const signInWithGoogleIdToken = useCallback(async (idToken: string) => {
+    const auth = ensureFirebaseAuth();
+    const credential = GoogleAuthProvider.credential(idToken);
+    const result = await signInWithCredential(auth, credential);
+    await ensureUserDocument(result.user);
+  }, []);
+
   const signUp = useCallback(async (email: string, password: string) => {
     const auth = ensureFirebaseAuth();
     const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
@@ -187,6 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthLoading,
       isFirebaseReady: isFirebaseConfigured && Boolean(firebaseAuth),
       signIn,
+      signInWithGoogleIdToken,
       signUp,
       logOut,
       sendVerificationEmail,
@@ -204,6 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetPassword,
       sendVerificationEmail,
       signIn,
+      signInWithGoogleIdToken,
       signUp,
       startMockSubscription,
       subscription,

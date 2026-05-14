@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { colors, typography } from "@/constants/app-theme";
+import { typography } from "@/constants/app-theme";
+import { useAppAppearance } from "@/lib/app-appearance";
 
 type SectionBlockProps = {
   title: string;
@@ -9,12 +10,14 @@ type SectionBlockProps = {
 };
 
 export function SectionBlock({ title, children }: SectionBlockProps) {
+  const { palette, layoutScale } = useAppAppearance();
+
   return (
-    <View style={styles.section}>
-      <Text selectable style={styles.title}>
+    <View style={[styles.section, { gap: Math.round(14 * layoutScale) }]}>
+      <Text selectable style={[styles.title, { color: palette.text }]}>
         {title}
       </Text>
-      <View style={styles.body}>{children}</View>
+      <View style={[styles.body, { gap: Math.round(8 * layoutScale) }]}>{children}</View>
     </View>
   );
 }
@@ -24,7 +27,6 @@ const styles = StyleSheet.create({
     gap: 14
   },
   title: {
-    color: colors.text,
     fontSize: typography.section,
     fontWeight: "800",
     letterSpacing: 0

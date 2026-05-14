@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { type Href, useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -44,12 +44,23 @@ const homeSlides: {
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const scrollerRef = useRef<ScrollView>(null);
   const [activeSlide, setActiveSlide] = useState(0);
   const slideWidth = Math.min(width - 44, 360);
 
   const handleSlideScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const nextIndex = Math.round(event.nativeEvent.contentOffset.x / slideWidth);
     setActiveSlide(Math.max(0, Math.min(homeSlides.length - 1, nextIndex)));
+  };
+
+  const moveSlide = (direction: -1 | 1) => {
+    const nextIndex =
+      (activeSlide + direction + homeSlides.length) % homeSlides.length;
+    scrollerRef.current?.scrollTo({
+      x: nextIndex * slideWidth,
+      animated: true
+    });
+    setActiveSlide(nextIndex);
   };
 
   return (
@@ -61,6 +72,7 @@ export default function HomeScreen() {
     >
       <View style={[styles.preview, { width: slideWidth }]}>
         <ScrollView
+          ref={scrollerRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
@@ -100,13 +112,35 @@ export default function HomeScreen() {
           ))}
         </ScrollView>
 
-        <View style={styles.heroDots} pointerEvents="none">
-          {homeSlides.map((slide, index) => (
-            <View
-              key={slide.label}
-              style={[styles.heroDot, activeSlide === index && styles.heroDotActive]}
-            />
-          ))}
+        <View style={styles.sliderControls}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="이전 슬라이드"
+            style={styles.sliderButton}
+            onPress={() => moveSlide(-1)}
+          >
+            <Text selectable={false} style={styles.sliderButtonText}>
+              ‹
+            </Text>
+          </Pressable>
+          <View style={styles.heroDots} pointerEvents="none">
+            {homeSlides.map((slide, index) => (
+              <View
+                key={slide.label}
+                style={[styles.heroDot, activeSlide === index && styles.heroDotActive]}
+              />
+            ))}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="다음 슬라이드"
+            style={styles.sliderButton}
+            onPress={() => moveSlide(1)}
+          >
+            <Text selectable={false} style={styles.sliderButtonText}>
+              ›
+            </Text>
+          </Pressable>
         </View>
       </View>
     </ScreenShell>
@@ -117,7 +151,8 @@ const styles = StyleSheet.create({
   preview: {
     alignItems: "center",
     alignSelf: "center",
-    paddingVertical: 4
+    paddingTop: 4,
+    paddingBottom: 18
   },
   heroScroller: {
     width: "100%",
@@ -141,7 +176,8 @@ const styles = StyleSheet.create({
   },
   heroCopy: {
     gap: 8,
-    paddingVertical: 16,
+    paddingTop: 18,
+    paddingBottom: 26,
     paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: colors.line
@@ -178,21 +214,46 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     letterSpacing: 0
   },
-  heroDots: {
-    position: "absolute",
-    bottom: 18,
-    left: 16,
+  sliderControls: {
+    width: "100%",
+    minHeight: 42,
     flexDirection: "row",
-    gap: 6
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    marginTop: 12
+  },
+  sliderButton: {
+    width: 42,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: colors.background
+  },
+  sliderButtonText: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 26,
+    letterSpacing: 0
+  },
+  heroDots: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
   },
   heroDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.45)"
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: "transparent"
   },
   heroDotActive: {
-    width: 18,
+    width: 8,
     backgroundColor: colors.text
   }
 });

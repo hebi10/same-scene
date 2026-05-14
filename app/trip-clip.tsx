@@ -45,10 +45,8 @@ import {
   type GuideType
 } from "@/constants/camera-guides";
 import {
-  MUSIC_TRACKS,
   TRIP_CLIP_RATIOS,
   TRIP_CLIP_TRANSITIONS,
-  type MusicTrack,
   type TripClipRatio,
   type TripClipTemplate,
   type TripClipTransition
@@ -84,6 +82,10 @@ import {
 } from "@/lib/work-library";
 import { useAuth } from "@/lib/auth-context";
 import { backupImageBundleWork, backupMadeVideo } from "@/lib/cloud-backup";
+import {
+  syncUserMusicTracks,
+  type UserMusicTrack
+} from "@/lib/user-music";
 import type { PhotoItem } from "@/types/photo";
 
 const DEFAULT_DURATION = 2.5;
@@ -101,8 +103,7 @@ const FADE_OPTIONS = [
   { label: "길게", value: 0.75 }
 ] as const;
 
-type MusicMode = "none" | "device" | "recommended";
-type RecommendedMusicId = Exclude<MusicTrack["id"], "none">;
+type MusicMode = "none" | "device";
 type ExportFormat = "mp4" | "images";
 type ExportProgress = {
   visible: boolean;
@@ -121,8 +122,7 @@ type EditorTab = "photos" | "timeline" | "video" | "guide" | "music" | "export";
 
 const MUSIC_MODE_OPTIONS: { label: string; value: MusicMode }[] = [
   { label: "무음", value: "none" },
-  { label: "내 음악", value: "device" },
-  { label: "추천 음악", value: "recommended" }
+  { label: "내 음악", value: "device" }
 ];
 
 const EXPORT_FORMAT_OPTIONS: {
@@ -163,11 +163,6 @@ const IMAGE_SAVE_FORMAT_OPTIONS: {
     detail: "호환성이 높은 JPG로 저장합니다."
   }
 ];
-
-const RECOMMENDED_MUSIC_TRACKS = MUSIC_TRACKS.filter(
-  (track): track is MusicTrack & { id: RecommendedMusicId; source: number } =>
-    track.id !== "none" && typeof track.source === "number"
-);
 
 const GUIDE_SIZE_OPTIONS = [
   { label: "작게", value: 34 },
@@ -358,9 +353,9 @@ export default function TripClipScreen() {
   const [template, setTemplate] = useState<TripClipTemplate>("minimal");
   const [transition, setTransition] = useState<TripClipTransition>("fade");
   const [transitionDuration, setTransitionDuration] = useState(0.45);
-  const [musicMode] = useState<MusicMode>("none");
-  const [selectedMusicId] = useState<RecommendedMusicId>("calm");
-  const [customMusic] = useState<CustomMusic | null>(null);
+  const [musicMode, setMusicMode] = useState<MusicMode>("none");
+  const [userMusicTracks, setUserMusicTracks] = useState<UserMusicTrack[]>([]);
+  const [selectedUserMusicId, setSelectedUserMusicId] = useState<string | null>(null);
   const [volume] = useState(0.7);
   const [previewAdjustEnabled, setPreviewAdjustEnabled] = useState(false);
   const [previewGuideVisible, setPreviewGuideVisible] = useState(false);
@@ -387,7 +382,6 @@ export default function TripClipScreen() {
   const [exportProgress, setExportProgress] =
     useState<ExportProgress>(initialExportProgress);
   const [isExportComingSoonVisible, setIsExportComingSoonVisible] = useState(false);
-  const [isMusicComingSoonVisible, setIsMusicComingSoonVisible] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [progressSeconds, setProgressSeconds] = useState(0);
   const [recordingFrameIndex, setRecordingFrameIndex] = useState(0);
@@ -398,26 +392,31 @@ export default function TripClipScreen() {
   const playbackOffsetRef = useRef(0);
   const playbackProgress = useSharedValue(0);
 
-  const selectedMusic =
-    RECOMMENDED_MUSIC_TRACKS.find((track) => track.id === selectedMusicId) ??
-    RECOMMENDED_MUSIC_TRACKS[0];
+  const selectedUserMusic =
+    userMusicTracks.find((track) => track.id === selectedUserMusicId) ??
+    userMusicTracks[0];
+  const customMusic = useMemo<CustomMusic | null>(() => {
+    if (musicMode !== "device" || !selectedUserMusic) {
+      return null;
+    }
+
+    return {
+      uri: selectedUserMusic.uri,
+      name: selectedUserMusic.name,
+      mimeType: selectedUserMusic.mimeType
+    };
+  }, [musicMode, selectedUserMusic]);
   const activeMusicSource = useMemo<AudioSource | undefined>(() => {
     if (musicMode === "device") {
       return customMusic ? { uri: customMusic.uri, name: customMusic.name } : undefined;
     }
 
-    if (musicMode === "recommended") {
-      return selectedMusic.source;
-    }
-
     return undefined;
-  }, [customMusic, musicMode, selectedMusic.source]);
+  }, [customMusic, musicMode]);
   const activeMusicLabel =
     musicMode === "device"
       ? customMusic?.name ?? "내 음악 선택"
-      : musicMode === "recommended"
-        ? selectedMusic.label
-        : "무음";
+      : "무음";
   const player = useAudioPlayer(activeMusicSource);
 
   const selectedPhotos = useMemo(
@@ -490,11 +489,23 @@ export default function TripClipScreen() {
 
   const loadPhotos = useCallback(async () => {
     setIsLoading(true);
-    const [storedPhotos, settings] = await Promise.all([
+    const [storedPhotos, settings, storedMusicTracks] = await Promise.all([
       getPhotos().then(ensurePhotoPreviews),
-      getAppSettings()
+      getAppSettings(),
+      user ? syncUserMusicTracks(user) : Promise.resolve([])
     ]);
     setPhotos(storedPhotos);
+    setUserMusicTracks(storedMusicTracks);
+    setSelectedUserMusicId((current) => {
+      if (current && storedMusicTracks.some((track) => track.id === current)) {
+        return current;
+      }
+
+      return storedMusicTracks[0]?.id ?? null;
+    });
+    if (storedMusicTracks.length === 0) {
+      setMusicMode("none");
+    }
     setPreviewGuide(settings.defaultGuide);
     setPreviewGuideVisible(settings.guideVisible);
     setPreviewGuideSize(settings.guideSize);
@@ -547,7 +558,7 @@ export default function TripClipScreen() {
         .map((photo) => photo.id);
     });
     setIsLoading(false);
-  }, [bundleId, videoId]);
+  }, [bundleId, user, videoId]);
 
   const applyPreviewGuideSize = useCallback((value: number) => {
     const nextSize = Math.round(
@@ -659,6 +670,10 @@ export default function TripClipScreen() {
       setIsMusicPreviewing(false);
     }
   }, [activeMusicSource, player, volume]);
+
+  useEffect(() => {
+    setRenderedVideoUri(null);
+  }, [customMusic?.uri, musicMode, selectedUserMusicId]);
 
   useEffect(() => {
     if (activeIndex >= selectedPhotos.length) {
@@ -974,6 +989,10 @@ export default function TripClipScreen() {
     const outputSize = recordingOutputSize[ratio];
     const outputUri = `${FileSystem.cacheDirectory}trip-clip-${Date.now()}.mp4`;
     const output = toNativeFilePath(outputUri);
+    const audioFilePath =
+      musicMode === "device" && customMusic?.uri?.startsWith("file")
+        ? toNativeFilePath(customMusic.uri)
+        : null;
 
     await preloadSelectedPreviewImages();
     setRecordingFrameIndex(0);
@@ -989,6 +1008,7 @@ export default function TripClipScreen() {
       codec: "h264",
       quality: 0.92,
       keyFrameInterval: 1,
+      ...(audioFilePath ? { audioFile: { path: audioFilePath, startTime: 0 } } : {}),
       onFrame: async ({ frameIndex }) => {
         setRecordingFrameIndex(frameIndex);
         await waitForPaint();
@@ -1059,12 +1079,7 @@ export default function TripClipScreen() {
       template,
       transition,
       transitionDuration,
-      musicId:
-        musicMode === "device"
-          ? "custom"
-          : musicMode === "recommended"
-            ? selectedMusicId
-            : "none",
+      musicId: musicMode === "device" && customMusic ? "custom" : "none",
       customMusic: musicMode === "device" ? customMusic ?? undefined : undefined,
       volume,
       frames: selectedPhotos.map((photo, index) => ({
@@ -1229,12 +1244,7 @@ export default function TripClipScreen() {
           next[photo.id] = getFrameDuration(photo.id, index);
           return next;
         }, {}),
-        musicId:
-          musicMode === "device"
-            ? "custom"
-            : musicMode === "recommended"
-              ? selectedMusicId
-              : "none",
+        musicId: musicMode === "device" && customMusic ? "custom" : "none",
         musicLabel: activeMusicLabel
       });
       let backupWarning: string | null = null;
@@ -1324,6 +1334,30 @@ export default function TripClipScreen() {
       setIsExporting(false);
     }
   };
+
+  const renderAddPhotoTile = () => (
+    <Pressable
+      disabled={isImportingPhotos}
+      style={[
+        styles.photoTile,
+        styles.addPhotoTile,
+        isImportingPhotos && styles.disabledButton
+      ]}
+      onPress={pickPhotosFromPreview}
+    >
+      <View style={styles.addPhotoIcon}>
+        <Text selectable={false} style={styles.addPhotoIconText}>
+          +
+        </Text>
+      </View>
+      <Text selectable={false} style={styles.addPhotoTitle}>
+        사진 추가
+      </Text>
+      <Text selectable={false} style={styles.addPhotoDetail}>
+        앨범에서 선택
+      </Text>
+    </Pressable>
+  );
 
   return (
     <View style={styles.screenRoot}>
@@ -1519,32 +1553,21 @@ export default function TripClipScreen() {
                 </Pressable>
               );
             })}
-            <Pressable
-              disabled={isImportingPhotos}
-              style={[
-                styles.photoTile,
-                styles.addPhotoTile,
-                isImportingPhotos && styles.disabledButton
-              ]}
-              onPress={pickPhotosFromPreview}
-            >
-              <View style={styles.addPhotoIcon}>
-                <Text selectable={false} style={styles.addPhotoIconText}>
-                  +
-                </Text>
-              </View>
-              <Text selectable={false} style={styles.addPhotoTitle}>
-                사진 추가
-              </Text>
-              <Text selectable={false} style={styles.addPhotoDetail}>
-                앨범에서 선택
-              </Text>
-            </Pressable>
+            {renderAddPhotoTile()}
           </ScrollView>
         ) : (
-          <Text selectable style={styles.emptyText}>
-            아직 사진이 없습니다. 먼저 사진을 촬영하거나 편집해 주세요.
-          </Text>
+          <View style={styles.emptyPhotoPicker}>
+            <Text selectable style={styles.emptyText}>
+              아직 사진이 없습니다. 먼저 사진을 촬영하거나 편집해 주세요.
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photoPicker}
+            >
+              {renderAddPhotoTile()}
+            </ScrollView>
+          </View>
         )}
       </Section>
       ) : null}
@@ -1740,34 +1763,118 @@ export default function TripClipScreen() {
 
       {activeEditorTab === "music" ? (
       <Section title="음악">
-        <Pressable
-          style={({ pressed }) => [
-            styles.musicComingSoonCard,
-            pressed && styles.emptyPreviewPressed
-          ]}
-          onPress={() => setIsMusicComingSoonVisible(true)}
-        >
-          <Text selectable style={styles.musicTitle}>
-            음악 기능 준비중
-          </Text>
-          <Text selectable style={styles.musicDetail}>
-            이곳에서 음악을 넣고 영상 분위기가 어떻게 달라지는지 미리 확인할 수 있게 준비하고 있습니다.
-          </Text>
-          <View style={styles.musicComingSoonModes}>
-            {MUSIC_MODE_OPTIONS.map((item) => (
-              <View key={item.value} style={styles.musicComingSoonMode}>
-                <Text selectable={false} style={styles.musicComingSoonModeText}>
-                  {item.label}
+        <View style={styles.musicList}>
+          <View style={styles.musicModeRow}>
+            {MUSIC_MODE_OPTIONS.map((item) => {
+              const isActive = musicMode === item.value;
+
+              return (
+                <Pressable
+                  key={item.value}
+                  style={[styles.chip, isActive && styles.chipActive]}
+                  onPress={() => {
+                    if (item.value === "device" && userMusicTracks.length === 0) {
+                      setExportMessage("마이페이지에서 내 음악을 먼저 추가해 주세요.");
+                    }
+                    setMusicMode(item.value);
+                  }}
+                >
+                  <Text
+                    selectable={false}
+                    style={[styles.chipText, isActive && styles.chipTextActive]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {musicMode === "none" ? (
+            <View style={[styles.musicRow, styles.musicRowActive]}>
+              <View style={styles.musicCopy}>
+                <Text selectable style={styles.musicTitle}>
+                  무음
+                </Text>
+                <Text selectable style={styles.musicDetail}>
+                  배경음악 없이 사진 전환만 재생합니다.
                 </Text>
               </View>
-            ))}
-          </View>
-          <View style={styles.musicPickButton}>
+              <View style={styles.musicMark} />
+            </View>
+          ) : null}
+          {musicMode === "device" ? (
+            <View style={styles.musicUserPanel}>
+              {userMusicTracks.length > 0 ? (
+                userMusicTracks.map((track) => {
+                  const isActive = selectedUserMusic?.id === track.id;
+
+                  return (
+                    <Pressable
+                      key={track.id}
+                      style={[styles.musicRow, isActive && styles.musicRowActive]}
+                      onPress={() => setSelectedUserMusicId(track.id)}
+                    >
+                      <View style={styles.musicCopy}>
+                        <Text selectable style={styles.musicTitle}>
+                          {track.name}
+                        </Text>
+                        <Text selectable style={styles.musicDetail}>
+                          마이페이지에 저장한 내 음악입니다.
+                        </Text>
+                      </View>
+                      {isActive ? <View style={styles.musicMark} /> : null}
+                    </Pressable>
+                  );
+                })
+              ) : (
+                <View style={styles.musicComingSoonCard}>
+                  <Text selectable style={styles.musicTitle}>
+                    저장한 음악이 없습니다
+                  </Text>
+                  <Text selectable style={styles.musicDetail}>
+                    마이페이지에서 핸드폰 음악을 최대 3개까지 추가한 뒤 이곳에서 선택할 수 있습니다.
+                  </Text>
+                  <Pressable
+                    style={styles.musicPickButton}
+                    onPress={() => router.push("/account" as Href)}
+                  >
+                    <Text selectable={false} style={styles.musicPickButtonText}>
+                      마이페이지로 이동
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.volumeControls}>
+          <Text selectable style={styles.musicTitle}>
+            현재 음악
+          </Text>
+          <Text selectable style={styles.musicDetail}>
+            {activeMusicLabel}
+          </Text>
+          <Pressable
+            disabled={!activeMusicSource}
+            style={[styles.musicPickButton, !activeMusicSource && styles.disabledButton]}
+            onPress={() => {
+              if (!activeMusicSource) {
+                return;
+              }
+
+              if (isPlaying) {
+                stopPlayback();
+                return;
+              }
+
+              void playClip();
+            }}
+          >
             <Text selectable={false} style={styles.musicPickButtonText}>
-              준비중
+              {isPlaying ? "정지" : "음악 미리듣기"}
             </Text>
-          </View>
-        </Pressable>
+          </Pressable>
+        </View>
       </Section>
       ) : null}
 
@@ -1951,9 +2058,6 @@ export default function TripClipScreen() {
               ]}
               onPress={() => {
                 setActiveEditorTab(tab.value);
-                if (tab.value === "music") {
-                  setIsMusicComingSoonVisible(true);
-                }
               }}
             >
               <Text
@@ -2090,33 +2194,6 @@ export default function TripClipScreen() {
           </View>
         </View>
       </Modal>
-      <Modal
-        visible={isMusicComingSoonVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setIsMusicComingSoonVisible(false)}
-      >
-        <View style={styles.exportModalBackdrop}>
-          <View style={[styles.exportModalPanel, styles.comingSoonPanel]}>
-            <Text style={styles.exportModalTitle}>
-              준비중입니다
-            </Text>
-            <Text style={styles.exportModalDetail}>
-              음악을 넣고 영상 분위기가 어떻게 달라지는지 미리 확인할 수 있는 기능을 준비하고 있습니다.
-            </Text>
-            <View style={styles.exportModalActions}>
-              <Pressable
-                style={[styles.primaryButton, styles.exportModalButton]}
-                onPress={() => setIsMusicComingSoonVisible(false)}
-              >
-                <Text selectable={false} style={styles.primaryButtonText}>
-                  확인
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -2235,11 +2312,16 @@ function TimelineScrubber({
   const progressRatio =
     totalDuration > 0 ? Math.max(0, Math.min(1, progressSeconds / totalDuration)) : 0;
   const progress = useSharedValue(progressRatio);
+  const isScrubbing = useSharedValue(false);
 
   useEffect(() => {
+    if (isScrubbing.value) {
+      return;
+    }
+
     progress.value = progressRatio;
     progressValue.value = progressSeconds;
-  }, [progress, progressRatio, progressSeconds, progressValue]);
+  }, [isScrubbing, progress, progressRatio, progressSeconds, progressValue]);
 
   const commitSeek = useCallback(
     (ratio: number) => {
@@ -2254,6 +2336,7 @@ function TimelineScrubber({
         .enabled(trackWidth > 0 && totalDuration > 0)
         .minDistance(0)
         .onBegin((event) => {
+          isScrubbing.value = true;
           const ratio = Math.max(0, Math.min(1, event.x / trackWidth));
           progress.value = ratio;
           progressValue.value = ratio * totalDuration;
@@ -2264,9 +2347,10 @@ function TimelineScrubber({
           progressValue.value = ratio * totalDuration;
         })
         .onFinalize(() => {
+          isScrubbing.value = false;
           runOnJS(commitSeek)(progress.value);
         }),
-    [commitSeek, progress, progressValue, totalDuration, trackWidth]
+    [commitSeek, isScrubbing, progress, progressValue, totalDuration, trackWidth]
   );
 
   const fillStyle = useAnimatedStyle(() => ({
@@ -2653,6 +2737,9 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingRight: 8
   },
+  emptyPhotoPicker: {
+    gap: 12
+  },
   photoTile: {
     width: 124,
     borderWidth: 1,
@@ -2949,19 +3036,33 @@ const styles = StyleSheet.create({
     color: colors.inverse
   },
   musicList: {
+    gap: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line
+  },
+  musicModeRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingTop: 12
+  },
+  musicUserPanel: {
+    gap: 8
   },
   musicRow: {
     minHeight: 60,
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line
+    borderBottomColor: colors.line,
+    backgroundColor: colors.background
   },
   musicRowActive: {
+    borderColor: colors.text,
     backgroundColor: colors.surface
   },
   musicComingSoonCard: {
@@ -3008,12 +3109,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0
   },
   musicMark: {
-    minWidth: 36,
-    color: colors.text,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0,
-    textAlign: "right"
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.text
   },
   musicPickButton: {
     minWidth: 58,
@@ -3029,11 +3128,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0
   },
   volumeControls: {
-    flex: 1,
     minHeight: controls.height,
+    gap: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  volumeActionRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
     gap: 8
   },
   volumeText: {

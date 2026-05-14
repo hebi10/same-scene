@@ -66,6 +66,7 @@ const GUIDE_COLOR_OPTIONS = [
 
 const CAMERA_NAV_ITEMS = [
   { label: "홈", detail: "시작 화면", href: "/home" },
+  { label: "마이페이지", detail: "계정과 구독 관리", href: "/account" },
   { label: "편집", detail: "사진 관리", href: "/studio" },
   { label: "앱 설정", detail: "기본값 관리", href: "/settings" }
 ] as const;
@@ -95,6 +96,8 @@ const CAMERA_FLASH_OPTIONS: { label: string; value: FlashMode }[] = [
 
 const CAMERA_ZOOM_MIN = 0;
 const CAMERA_ZOOM_MAX = 100;
+const CAMERA_FLIP_SWIPE_THRESHOLD = 70;
+const CAMERA_FLIP_HORIZONTAL_TOLERANCE = 1.4;
 
 type CameraTimerValue = (typeof CAMERA_TIMER_OPTIONS)[number]["value"];
 type CameraQualityValue = (typeof CAMERA_QUALITY_OPTIONS)[number]["value"];
@@ -225,7 +228,7 @@ export default function CameraScreen() {
     }, [])
   );
 
-  const triggerFeedback = async () => {
+  const triggerFeedback = useCallback(async () => {
     if (!hapticEnabled) {
       return;
     }
@@ -235,7 +238,7 @@ export default function CameraScreen() {
     } catch {
       // 웹과 일부 시뮬레이터에서는 햅틱이 지원되지 않을 수 있습니다.
     }
-  };
+  }, [hapticEnabled]);
 
   const capturePhoto = async () => {
     if (!cameraRef.current || !isCameraReady) {
@@ -341,12 +344,17 @@ export default function CameraScreen() {
     setZoomPercent(nextZoom);
   }, []);
 
-  const changeCameraFacing = (value: CameraType) => {
+  const changeCameraFacing = useCallback((value: CameraType) => {
     setCameraFacing(value);
     if (value === "front") {
       setTorchEnabled(false);
     }
-  };
+  }, []);
+
+  const toggleCameraFacingBySwipe = useCallback(() => {
+    changeCameraFacing(cameraFacing === "back" ? "front" : "back");
+    void triggerFeedback();
+  }, [cameraFacing, changeCameraFacing, triggerFeedback]);
 
   const resetOverlay = () => {
     setOverlayOpacity(defaultOverlayOpacity.current);
@@ -390,6 +398,50 @@ export default function CameraScreen() {
     setNavigationOpen(false);
     router.push(href);
   };
+
+  const cameraSwipePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          if (
+            isCameraModalOpen ||
+            cameraMenuOpen ||
+            overlaySetupActive ||
+            isCapturing
+          ) {
+            return false;
+          }
+
+          const verticalDistance = Math.abs(gestureState.dy);
+          const horizontalDistance = Math.abs(gestureState.dx);
+
+          return (
+            verticalDistance > CAMERA_FLIP_SWIPE_THRESHOLD &&
+            verticalDistance > horizontalDistance * CAMERA_FLIP_HORIZONTAL_TOLERANCE
+          );
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const verticalDistance = Math.abs(gestureState.dy);
+          const horizontalDistance = Math.abs(gestureState.dx);
+
+          if (
+            verticalDistance > CAMERA_FLIP_SWIPE_THRESHOLD &&
+            verticalDistance > horizontalDistance * CAMERA_FLIP_HORIZONTAL_TOLERANCE
+          ) {
+            toggleCameraFacingBySwipe();
+          }
+        },
+        onPanResponderTerminationRequest: () => true
+      }),
+    [
+      cameraMenuOpen,
+      isCameraModalOpen,
+      isCapturing,
+      overlaySetupActive,
+      toggleCameraFacingBySwipe
+    ]
+  );
 
   if (!permission) {
     return (
@@ -453,6 +505,12 @@ export default function CameraScreen() {
         resetKey={overlayResetKey}
       />
 
+      <View
+        pointerEvents={isCameraModalOpen || overlaySetupActive ? "none" : "box-only"}
+        style={styles.cameraSwipeLayer}
+        {...cameraSwipePanResponder.panHandlers}
+      />
+
       {countdown ? (
         <View style={styles.countdownOverlay}>
           <Text selectable={false} style={styles.countdownText}>
@@ -481,7 +539,7 @@ export default function CameraScreen() {
                 onPress={openCameraSettingsMenu}
               >
                 <Text selectable={false} style={styles.cameraDropdownText}>
-                  설정
+                  카메라 설정
                 </Text>
               </Pressable>
               <Pressable
@@ -489,12 +547,12 @@ export default function CameraScreen() {
                 onPress={openReferenceOverlayMenu}
               >
                 <Text selectable={false} style={styles.cameraDropdownText}>
-                  {referenceUri ? "오버레이 조정" : "이전 사진"}
+                  사진 가이드 띄우기
                 </Text>
               </Pressable>
               <Pressable style={styles.cameraDropdownItem} onPress={openNavigationMenu}>
                 <Text selectable={false} style={styles.cameraDropdownText}>
-                  화면 이동
+                  페이지 이동
                 </Text>
               </Pressable>
             </View>
@@ -1131,10 +1189,10 @@ function SmoothValueSlider({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: (event) => {
-          setValueFromLocation(event.nativeEvent.locationX, true);
+          setValueFromLocation(event.nativeEvent.locationX, false);
         },
         onPanResponderMove: (event) => {
-          setValueFromLocation(event.nativeEvent.locationX, true);
+          setValueFromLocation(event.nativeEvent.locationX, false);
         },
         onPanResponderRelease: (event) => {
           setValueFromLocation(event.nativeEvent.locationX, true);
@@ -1209,6 +1267,15 @@ const styles = StyleSheet.create({
   },
   camera: {
     ...StyleSheet.absoluteFillObject
+  },
+  cameraSwipeLayer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 92,
+    bottom: 188,
+    zIndex: 4,
+    backgroundColor: "transparent"
   },
   topBar: {
     position: "absolute",

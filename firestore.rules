@@ -42,6 +42,10 @@ service cloud.firestore {
         allow read, create, update, delete: if isOwner(userId);
       }
 
+      match /musicTracks/{trackId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
       match /subscriptions/{subscriptionId} {
         allow read: if isOwner(userId);
 

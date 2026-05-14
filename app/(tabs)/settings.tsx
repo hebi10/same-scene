@@ -15,6 +15,10 @@ import { ScreenShell } from "@/components/screen-shell";
 import { SectionBlock } from "@/components/section-block";
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
 import { GUIDE_LABELS, GUIDE_TYPES } from "@/constants/camera-guides";
+import {
+  DELETE_ACCOUNT_REQUEST_URL,
+  PRIVACY_POLICY_URL
+} from "@/constants/legal-links";
 import { TRIP_CLIP_RATIOS, type TripClipRatio } from "@/constants/trip-clip";
 import {
   DEFAULT_GUIDE_COLOR,
@@ -27,6 +31,7 @@ import {
   type ExportQuality,
   type FontSize,
   type FontStyle,
+  type ScreenLayout,
   type ThemeMode
 } from "@/lib/app-settings";
 import { useAuth } from "@/lib/auth-context";
@@ -42,6 +47,7 @@ type SettingKey =
   | "themeMode"
   | "fontStyle"
   | "fontSize"
+  | "screenLayout"
   | "cloudBackupEnabled";
 
 const opacityOptions = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
@@ -125,7 +131,21 @@ const fontSizeLabel: Record<FontSize, string> = {
   large: "크게"
 };
 
-const PRIVACY_POLICY_URL = "https://sevim0104.cafe24.com/privacy/index.html";
+const screenLayoutOptions: {
+  value: ScreenLayout;
+  label: string;
+  detail: string;
+}[] = [
+  { value: "compact", label: "간결", detail: "여백을 줄여 정보를 빠르게 확인합니다." },
+  { value: "balanced", label: "기본", detail: "여백과 정보 밀도의 균형을 맞춥니다." },
+  { value: "comfortable", label: "여유", detail: "화면 사이 간격을 넓혀 편하게 봅니다." }
+];
+
+const screenLayoutLabel: Record<ScreenLayout, string> = {
+  compact: "간결",
+  balanced: "기본",
+  comfortable: "여유"
+};
 
 export default function SettingsScreen() {
   const {
@@ -202,6 +222,10 @@ export default function SettingsScreen() {
 
     if (activeSetting === "fontSize") {
       return "폰트 크기";
+    }
+
+    if (activeSetting === "screenLayout") {
+      return "화면 구성";
     }
 
     if (activeSetting === "cloudBackupEnabled") {
@@ -397,46 +421,172 @@ export default function SettingsScreen() {
             mark={fontSizeLabel[settings.fontSize]}
             onPress={() => setActiveSetting("fontSize")}
           />
-          <ActionRow label="화면 구성" detail="선, 여백, 타이포 중심의 정돈된 스타일" mark="간결" />
+          <ActionRow
+            label="화면 구성"
+            detail="선, 여백, 타이포 중심의 정돈된 스타일"
+            mark={screenLayoutLabel[settings.screenLayout]}
+            onPress={() => setActiveSetting("screenLayout")}
+          />
           <ActionRow
             label="개인정보처리방침"
             detail="권한 사용과 데이터 처리 안내"
             mark="열기"
             onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
           />
+          <ActionRow
+            label="계정 및 데이터 삭제 요청"
+            detail="계정 삭제와 저장 데이터 삭제 요청 안내"
+            mark="열기"
+            onPress={() => Linking.openURL(DELETE_ACCOUNT_REQUEST_URL)}
+          />
         </SectionBlock>
 
         <SectionBlock title="가이드">
-          <ActionRow
-            label="기본 가이드"
-            detail="카메라를 열 때 먼저 표시할 구도 가이드"
-            mark={GUIDE_LABELS[settings.defaultGuide]}
-            onPress={() => setActiveSetting("defaultGuide")}
-          />
-          <ActionRow
-            label="가이드 표시"
-            detail="카메라, 사진 편집, 여행 클립에 같은 가이드 표시"
-            mark={settings.guideVisible ? "켜짐" : "꺼짐"}
-            onPress={() => setActiveSetting("guideVisible")}
-          />
-          <ActionRow
-            label="가이드 크기"
-            detail="모든 화면에서 사용할 가이드라인 크기"
-            mark={String(settings.guideSize)}
-            onPress={() => setActiveSetting("guideSize")}
-          />
-          <ActionRow
-            label="가이드 색상"
-            detail="모든 화면에서 사용할 가이드라인 색상"
-            mark={guideColorOptions.find((option) => option.value === settings.guideColor)?.label ?? "사용자"}
-            onPress={() => setActiveSetting("guideColor")}
-          />
-          <ActionRow
-            label="오버레이 투명도"
-            detail="이전 사진을 카메라 위에 표시할 기본 농도"
-            mark={`${Math.round(settings.overlayOpacity * 100)}%`}
-            onPress={() => setActiveSetting("overlayOpacity")}
-          />
+          <View style={styles.guidePanel}>
+            <View style={styles.guidePanelHeader}>
+              <View style={styles.guidePanelCopy}>
+                <Text selectable style={styles.guidePanelTitle}>
+                  전체 가이드 설정
+                </Text>
+                <Text selectable style={styles.guidePanelDetail}>
+                  카메라, 사진 편집, 영상 만들기에 같은 가이드가 적용됩니다.
+                </Text>
+              </View>
+              <Pressable
+                style={[
+                  styles.guideVisibleButton,
+                  settings.guideVisible && styles.guideVisibleButtonActive
+                ]}
+                onPress={() => updateSetting({ guideVisible: !settings.guideVisible })}
+              >
+                <Text
+                  selectable={false}
+                  style={[
+                    styles.guideVisibleButtonText,
+                    settings.guideVisible && styles.guideVisibleButtonTextActive
+                  ]}
+                >
+                  {settings.guideVisible ? "켜짐" : "꺼짐"}
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.compactGroup}>
+              <Text selectable style={styles.compactGroupTitle}>
+                가이드라인
+              </Text>
+              <View style={styles.compactOptionRow}>
+                {GUIDE_TYPES.map((guide) => (
+                  <Pressable
+                    key={guide}
+                    style={[
+                      styles.compactOption,
+                      settings.defaultGuide === guide && styles.compactOptionActive
+                    ]}
+                    onPress={() => updateSetting({ defaultGuide: guide, guideVisible: true })}
+                  >
+                    <Text
+                      selectable={false}
+                      style={[
+                        styles.compactOptionText,
+                        settings.defaultGuide === guide && styles.compactOptionTextActive
+                      ]}
+                    >
+                      {GUIDE_LABELS[guide]}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.compactGroup}>
+              <Text selectable style={styles.compactGroupTitle}>
+                크기
+              </Text>
+              <View style={styles.compactOptionRow}>
+                {guideSizeOptions.map((size) => (
+                  <Pressable
+                    key={size.value}
+                    style={[
+                      styles.compactOption,
+                      settings.guideSize === size.value && styles.compactOptionActive
+                    ]}
+                    onPress={() => updateSetting({ guideSize: size.value, guideVisible: true })}
+                  >
+                    <Text
+                      selectable={false}
+                      style={[
+                        styles.compactOptionText,
+                        settings.guideSize === size.value && styles.compactOptionTextActive
+                      ]}
+                    >
+                      {size.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.compactGroup}>
+              <Text selectable style={styles.compactGroupTitle}>
+                색상
+              </Text>
+              <View style={styles.colorGrid}>
+                {guideColorOptions.map((color) => {
+                  const isActive = settings.guideColor === color.value;
+
+                  return (
+                    <Pressable
+                      key={color.label}
+                      style={[styles.colorButton, isActive && styles.colorButtonActive]}
+                      onPress={() =>
+                        updateSetting({ guideColor: color.value, guideVisible: true })
+                      }
+                    >
+                      <View
+                        style={[
+                          styles.colorSwatch,
+                          { backgroundColor: color.value },
+                          color.label === "흰색" && styles.colorSwatchLight
+                        ]}
+                      />
+                      <Text selectable={false} style={styles.colorButtonText}>
+                        {color.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.compactGroup}>
+              <Text selectable style={styles.compactGroupTitle}>
+                오버레이 투명도
+              </Text>
+              <View style={styles.compactOptionRow}>
+                {opacityOptions.map((opacity) => (
+                  <Pressable
+                    key={opacity}
+                    style={[
+                      styles.compactOption,
+                      settings.overlayOpacity === opacity && styles.compactOptionActive
+                    ]}
+                    onPress={() => updateSetting({ overlayOpacity: opacity })}
+                  >
+                    <Text
+                      selectable={false}
+                      style={[
+                        styles.compactOptionText,
+                        settings.overlayOpacity === opacity && styles.compactOptionTextActive
+                      ]}
+                    >
+                      {Math.round(opacity * 100)}%
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
         </SectionBlock>
 
         <SectionBlock title="내보내기">
@@ -600,6 +750,18 @@ export default function SettingsScreen() {
                   ))
                 : null}
 
+              {activeSetting === "screenLayout"
+                ? screenLayoutOptions.map((layout) => (
+                    <OptionButton
+                      key={layout.value}
+                      label={layout.label}
+                      detail={layout.detail}
+                      active={settings.screenLayout === layout.value}
+                      onPress={() => updateSetting({ screenLayout: layout.value })}
+                    />
+                  ))
+                : null}
+
               {activeSetting === "cloudBackupEnabled" ? (
                 <>
                   <OptionButton
@@ -741,6 +903,125 @@ const styles = StyleSheet.create({
   optionMarkActive: {
     borderColor: colors.inverse,
     backgroundColor: colors.inverse
+  },
+  guidePanel: {
+    gap: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  guidePanelHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  guidePanelCopy: {
+    flex: 1,
+    gap: 5
+  },
+  guidePanelTitle: {
+    color: colors.text,
+    fontSize: typography.section,
+    fontWeight: "900",
+    lineHeight: 21,
+    letterSpacing: 0
+  },
+  guidePanelDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+    letterSpacing: 0
+  },
+  guideVisibleButton: {
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  guideVisibleButtonActive: {
+    borderColor: colors.text,
+    backgroundColor: colors.text
+  },
+  guideVisibleButtonText: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  guideVisibleButtonTextActive: {
+    color: colors.inverse
+  },
+  compactGroup: {
+    gap: 9
+  },
+  compactGroupTitle: {
+    color: colors.text,
+    fontSize: typography.small,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  compactOptionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7
+  },
+  compactOption: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  compactOptionActive: {
+    borderColor: colors.text,
+    backgroundColor: colors.text
+  },
+  compactOptionText: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  compactOptionTextActive: {
+    color: colors.inverse
+  },
+  colorGrid: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: 6
+  },
+  colorButton: {
+    width: "15.8%",
+    minHeight: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  colorButtonActive: {
+    borderColor: colors.text
+  },
+  colorSwatch: {
+    width: 15,
+    height: 15,
+    borderWidth: 1,
+    borderColor: "transparent"
+  },
+  colorSwatchLight: {
+    borderColor: colors.faint
+  },
+  colorButtonText: {
+    color: colors.text,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0
   },
   accountPanel: {
     gap: 14,

@@ -20,10 +20,15 @@ service firebase.storage {
         && request.resource.contentType == 'video/mp4';
     }
 
+    function isAudioUpload() {
+      return request.resource.size < 50 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+
     match /users/{userId}/{allPaths=**} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId)
-        && (isImageUpload() || isVideoUpload());
+        && (isImageUpload() || isVideoUpload() || isAudioUpload());
       allow delete: if isOwner(userId);
     }
 
