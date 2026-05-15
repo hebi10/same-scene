@@ -13,7 +13,7 @@ export const showGoogleMobileInterstitialAd = ({
   const interstitial = InterstitialAd.createForAdRequest(adUnitId, {
     requestNonPersonalizedAdsOnly: true
   });
-  const unsubscribers: Array<() => void> = [];
+  const unsubscribers: (() => void)[] = [];
 
   const cleanup = () => {
     while (unsubscribers.length > 0) {

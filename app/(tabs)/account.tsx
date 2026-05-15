@@ -1287,7 +1287,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "900",
     lineHeight: 26,
-    letterSpacing: 0
+    letterSpacing: 0,
+    backgroundColor: "transparent"
   },
   planPrice: {
     color: colors.text,

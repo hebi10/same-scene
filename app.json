@@ -7,7 +7,7 @@
       "com.haebi.photoguide"
     ],
     "description": "여행 사진의 구도를 맞추고 쇼츠·릴스용 콘텐츠 제작을 돕는 촬영 가이드 앱입니다.",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -32,7 +32,7 @@
     },
     "android": {
       "package": "com.haebi.photoguide",
-      "versionCode": 5,
+      "versionCode": 6,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ],
@@ -123,7 +123,8 @@
       "privacyPolicyUrl": "https://sevim0104.cafe24.com/privacy/index.html",
       "admob": {
         "androidAppId": "ca-app-pub-3239289311207399~9959086380",
-        "androidBannerAdUnitId": "ca-app-pub-3239289311207399/3281997392"
+        "androidBannerAdUnitId": "ca-app-pub-3239289311207399/3281997392",
+        "androidInterstitialAdUnitId": ""
       },
       "eas": {
         "projectId": "36ca0ec3-771c-4cd9-9700-4610ea87edb9"

@@ -1361,7 +1361,7 @@ export default function TripClipScreen() {
       if (reservedWeeklyExport && user) {
         setWeeklyVideoExportUsage(await getWeeklyVideoExportUsage(user));
       }
-      if (shouldShowAds(subscription) && !reservedWeeklyExport) {
+      if (shouldShowAds(subscription)) {
         setIsPostSaveAdVisible(true);
       }
     } catch (error) {

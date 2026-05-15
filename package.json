@@ -11,6 +11,7 @@
     "android:run-latest": "eas build:run --platform android --latest",
     "android:reset-install": "npm run android:uninstall && npm run android:run-latest",
     "android:build-dev": "eas build --profile development --platform android",
+    "android:build-prod": "eas build --platform android --profile production",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
