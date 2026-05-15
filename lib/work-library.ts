@@ -1,5 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
+import { localStorageAdapter } from "@/lib/local-storage";
 import type { ImageBundleWorkItem } from "@/types/work";
 
 const IMAGE_BUNDLE_STORAGE_KEY = "travel-frame.image-bundles.v1";
@@ -29,14 +28,14 @@ const parseImageBundles = (value: string | null): ImageBundleWorkItem[] => {
 };
 
 const writeImageBundles = async (items: ImageBundleWorkItem[]) => {
-  await AsyncStorage.setItem(
+  await localStorageAdapter.setItem(
     IMAGE_BUNDLE_STORAGE_KEY,
     JSON.stringify(sortImageBundles(items))
   );
 };
 
 export const getImageBundleWorks = async () => {
-  const value = await AsyncStorage.getItem(IMAGE_BUNDLE_STORAGE_KEY);
+  const value = await localStorageAdapter.getItem(IMAGE_BUNDLE_STORAGE_KEY);
   return parseImageBundles(value);
 };
 

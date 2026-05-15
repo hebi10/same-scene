@@ -1,6 +1,8 @@
 import { useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Linking,
   Modal,
   Pressable,
@@ -36,6 +38,15 @@ import {
 } from "@/lib/app-settings";
 import { type AppPalette, useAppAppearance } from "@/lib/app-appearance";
 import { useAuth } from "@/lib/auth-context";
+import {
+  backupCurrentWorkspace,
+  cleanupExpiredBackup,
+  deleteCloudBackupData,
+  markBackupExpired,
+  subscribeCloudBackupOverview,
+  type CloudBackupOverview
+} from "@/lib/cloud-backup";
+import { isCreatorSubscriptionActive } from "@/lib/subscription";
 
 type SettingKey =
   | "defaultGuide"
@@ -52,6 +63,16 @@ type SettingKey =
   | "cloudBackupEnabled";
 
 const opacityOptions = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
+
+const emptyBackupOverview: CloudBackupOverview = {
+  photoCount: 0,
+  imageBundleCount: 0,
+  videoCount: 0,
+  deleteAfter: null,
+  status: "none",
+  backedUpAt: null,
+  deletedAt: null
+};
 
 const guideSizeOptions = [
   { label: "작게", value: 34 },
@@ -153,6 +174,7 @@ export default function SettingsScreen() {
   const themed = useMemo(() => createThemedStyles(palette), [palette]);
   const {
     user,
+    subscription,
     isLoggedIn,
     isAuthLoading,
     isFirebaseReady,
@@ -166,6 +188,18 @@ export default function SettingsScreen() {
   const [authPassword, setAuthPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [showBackupConfirm, setShowBackupConfirm] = useState(false);
+  const [guideExpanded, setGuideExpanded] = useState(false);
+  const [isBackupSubmitting, setIsBackupSubmitting] = useState(false);
+  const [backupOverview, setBackupOverview] =
+    useState<CloudBackupOverview>(emptyBackupOverview);
+
+  useEffect(() => {
+    return subscribeCloudBackupOverview({
+      user,
+      onChange: setBackupOverview
+    });
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -173,6 +207,8 @@ export default function SettingsScreen() {
 
       const loadSettings = async () => {
         const storedSettings = await getAppSettings();
+        await cleanupExpiredBackup({ user, subscription });
+        await markBackupExpired({ user, subscription });
         if (isActive) {
           setSettings(storedSettings);
         }
@@ -183,7 +219,7 @@ export default function SettingsScreen() {
       return () => {
         isActive = false;
       };
-    }, [])
+    }, [subscription, user])
   );
 
   const modalTitle = useMemo(() => {
@@ -246,6 +282,86 @@ export default function SettingsScreen() {
     setSettings(nextSettings);
     await saveAppSettings(nextSettings);
     setActiveSetting(null);
+  };
+
+  const handleEnableBackup = async () => {
+    if (!isLoggedIn || !user) {
+      setAuthMessage("로그인 후 백업을 사용할 수 있습니다.");
+      setActiveSetting(null);
+      return;
+    }
+
+    if (!isCreatorSubscriptionActive(subscription)) {
+      await markBackupExpired({ user, subscription });
+      setAuthMessage(
+        "영상 내보내기 월결제 기간이 만료되었거나 활성화되지 않았습니다. 백업은 사용할 수 없고 기존 백업은 만료 후 3개월 뒤 제거됩니다."
+      );
+      setActiveSetting(null);
+      return;
+    }
+
+    setActiveSetting(null);
+    setShowBackupConfirm(true);
+  };
+
+  const confirmBackup = async () => {
+    if (isBackupSubmitting) {
+      return;
+    }
+
+    try {
+      setIsBackupSubmitting(true);
+      setAuthMessage(null);
+      const summary = await backupCurrentWorkspace({ user, subscription });
+      await updateSetting({ cloudBackupEnabled: true });
+      setShowBackupConfirm(false);
+      setAuthMessage(
+        `백업을 완료했습니다. 사진 ${summary.photoCount}장, 여러 사진 작업 ${summary.imageBundleCount}개, 영상 ${summary.videoCount}개와 설정을 저장했습니다.`
+      );
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "백업 중 문제가 발생했습니다.");
+    } finally {
+      setIsBackupSubmitting(false);
+    }
+  };
+
+  const handleDeleteBackupData = () => {
+    if (!isLoggedIn || !user) {
+      setAuthMessage("로그인 후 백업 데이터를 삭제할 수 있습니다.");
+      return;
+    }
+
+    Alert.alert(
+      "백업 데이터를 삭제할까요?",
+      "계정에 백업된 사진, 여러 사진 작업, 영상 백업을 삭제합니다. 기기 안에 저장된 원본 작업물은 삭제하지 않습니다.",
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "삭제",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsBackupSubmitting(true);
+              const summary = await deleteCloudBackupData({ user });
+              await updateSetting({ cloudBackupEnabled: false });
+              setShowBackupConfirm(false);
+              setActiveSetting(null);
+              setAuthMessage(
+                `백업 데이터를 삭제했습니다. 사진 ${summary.photoCount}장, 여러 사진 작업 ${summary.imageBundleCount}개, 영상 ${summary.videoCount}개가 정리되었습니다.`
+              );
+            } catch (error) {
+              setAuthMessage(
+                error instanceof Error
+                  ? error.message
+                  : "백업 데이터를 삭제하지 못했습니다."
+              );
+            } finally {
+              setIsBackupSubmitting(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleAuthAction = async (mode: "signIn" | "signUp" | "logOut") => {
@@ -405,6 +521,28 @@ export default function SettingsScreen() {
                   mark={settings.cloudBackupEnabled ? "켜짐" : "꺼짐"}
                   onPress={() => setActiveSetting("cloudBackupEnabled")}
                 />
+                <View style={[styles.backupStatusPanel, themed.panel]}>
+                  <Text selectable style={[styles.backupStatusTitle, themed.text]}>
+                    백업 데이터
+                  </Text>
+                  <Text selectable style={[styles.backupStatusDetail, themed.mutedText]}>
+                    사진 {backupOverview.photoCount}장 / 여러 사진 작업{" "}
+                    {backupOverview.imageBundleCount}개 / 영상 {backupOverview.videoCount}개
+                  </Text>
+                  <Pressable
+                    disabled={isBackupSubmitting}
+                    style={[
+                      styles.authSecondaryButton,
+                      themed.secondaryButton,
+                      isBackupSubmitting && styles.disabledButton
+                    ]}
+                    onPress={handleDeleteBackupData}
+                  >
+                    <Text selectable={false} style={[styles.authSecondaryButtonText, themed.text]}>
+                      백업 데이터 삭제
+                    </Text>
+                  </Pressable>
+                </View>
                 <Pressable
                   disabled={isAuthSubmitting}
                   style={[
@@ -502,6 +640,23 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
 
+            <View style={styles.guideCollapsedRow}>
+              <Text selectable style={[styles.guideSummary, themed.mutedText]}>
+                {GUIDE_LABELS[settings.defaultGuide]} / {settings.guideSize} /{" "}
+                {Math.round(settings.overlayOpacity * 100)}%
+              </Text>
+              <Pressable
+                style={[styles.guideExpandButton, themed.secondaryButton]}
+                onPress={() => setGuideExpanded((value) => !value)}
+              >
+                <Text selectable={false} style={[styles.guideExpandButtonText, themed.text]}>
+                  {guideExpanded ? "접기" : "펼치기"}
+                </Text>
+              </Pressable>
+            </View>
+
+            {guideExpanded ? (
+              <>
             <View style={styles.compactGroup}>
               <Text selectable style={[styles.compactGroupTitle, themed.text]}>
                 가이드라인
@@ -634,6 +789,8 @@ export default function SettingsScreen() {
                 ))}
               </View>
             </View>
+              </>
+            ) : null}
           </View>
         </SectionBlock>
 
@@ -815,11 +972,20 @@ export default function SettingsScreen() {
 
               {activeSetting === "cloudBackupEnabled" ? (
                 <>
+                  <View style={[styles.backupStatusPanel, themed.panel]}>
+                    <Text selectable style={[styles.backupStatusTitle, themed.text]}>
+                      현재 백업
+                    </Text>
+                    <Text selectable style={[styles.backupStatusDetail, themed.mutedText]}>
+                      사진 {backupOverview.photoCount}장 / 여러 사진 작업{" "}
+                      {backupOverview.imageBundleCount}개 / 영상 {backupOverview.videoCount}개
+                    </Text>
+                  </View>
                   <OptionButton
                     label="켜짐"
                     detail="저장한 영상과 여러 사진 작업을 Firebase에 백업합니다."
                     active={settings.cloudBackupEnabled}
-                    onPress={() => updateSetting({ cloudBackupEnabled: true })}
+                    onPress={handleEnableBackup}
                   />
                   <OptionButton
                     label="꺼짐"
@@ -827,8 +993,71 @@ export default function SettingsScreen() {
                     active={!settings.cloudBackupEnabled}
                     onPress={() => updateSetting({ cloudBackupEnabled: false })}
                   />
+                  <Pressable
+                    disabled={isBackupSubmitting}
+                    style={[
+                      styles.deleteBackupButton,
+                      themed.secondaryButton,
+                      isBackupSubmitting && styles.disabledButton
+                    ]}
+                    onPress={handleDeleteBackupData}
+                  >
+                    <Text selectable={false} style={[styles.deleteBackupButtonText, themed.text]}>
+                      백업 데이터 삭제
+                    </Text>
+                  </Pressable>
                 </>
               ) : null}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showBackupConfirm}
+        onRequestClose={() => setShowBackupConfirm(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalPanel, themed.modalPanel]}>
+            <View style={styles.modalHeader}>
+              <Text selectable style={[styles.modalTitle, themed.text]}>
+                기존 작업을 백업할까요?
+              </Text>
+              <Pressable
+                style={[styles.closeButton, themed.secondaryButton]}
+                onPress={() => setShowBackupConfirm(false)}
+              >
+                <Text selectable={false} style={[styles.closeButtonText, themed.text]}>
+                  닫기
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.optionList}>
+              <Text selectable style={[styles.optionDetail, themed.mutedText]}>
+                현재 기기에 저장된 사진, 편집 결과, 영상 만들기 작업, 만든 영상 기록과 앱 설정을 계정 백업으로 저장합니다.
+              </Text>
+              <Text selectable style={[styles.optionDetail, themed.mutedText]}>
+                영상 내보내기 월결제 기간이 끝나면 새 백업은 중단되고, 기존 백업은 만료일 기준 3개월 뒤 제거될 수 있습니다.
+              </Text>
+              <Pressable
+                disabled={isBackupSubmitting}
+                style={[
+                  styles.authPrimaryButton,
+                  themed.activeFill,
+                  isBackupSubmitting && styles.disabledButton
+                ]}
+                onPress={confirmBackup}
+              >
+                {isBackupSubmitting ? (
+                  <ActivityIndicator color={palette.inverse} />
+                ) : (
+                  <Text selectable={false} style={[styles.authPrimaryButtonText, themed.inverseText]}>
+                    모두 백업하기
+                  </Text>
+                )}
+              </Pressable>
             </View>
           </View>
         </View>
@@ -1071,6 +1300,35 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     letterSpacing: 0
   },
+  guideCollapsedRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  guideSummary: {
+    flex: 1,
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: "800",
+    lineHeight: 18,
+    letterSpacing: 0
+  },
+  guideExpandButton: {
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  guideExpandButtonText: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
   guideVisibleButton: {
     minHeight: 34,
     justifyContent: "center",
@@ -1236,6 +1494,39 @@ const styles = StyleSheet.create({
   },
   loggedInActions: {
     gap: 10
+  },
+  backupStatusPanel: {
+    gap: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background
+  },
+  backupStatusTitle: {
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: "900",
+    letterSpacing: 0
+  },
+  backupStatusDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+    letterSpacing: 0
+  },
+  deleteBackupButton: {
+    minHeight: controls.height,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: colors.background
+  },
+  deleteBackupButtonText: {
+    color: colors.text,
+    fontSize: typography.button,
+    fontWeight: "900",
+    letterSpacing: 0
   },
   authPrimaryButton: {
     flex: 1,

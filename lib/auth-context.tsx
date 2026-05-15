@@ -28,6 +28,7 @@ import {
   freeSubscription,
   getUserSubscription,
   isPremiumSubscription,
+  type SubscriptionProductId,
   type UserSubscription
 } from "@/lib/subscription";
 
@@ -47,7 +48,9 @@ type AuthContextValue = {
   changePassword: (password: string) => Promise<void>;
   updateName: (displayName: string) => Promise<void>;
   refreshUser: () => Promise<void>;
-  startMockSubscription: () => Promise<UserSubscription>;
+  startMockSubscription: (
+    productId?: Exclude<SubscriptionProductId, "free">
+  ) => Promise<UserSubscription>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,8 +63,14 @@ const ensureFirebaseAuth = () => {
   return firebaseAuth;
 };
 
+const testAccountOverrides = new Set(["playtest@travelframe.app"]);
+
+const hasTestAccountOverride = (user: User | null) =>
+  Boolean(user?.email && testAccountOverrides.has(user.email.toLowerCase()));
+
 const hasVerifiedProvider = (user: User | null) =>
   Boolean(user?.emailVerified) ||
+  hasTestAccountOverride(user) ||
   Boolean(user?.providerData.some((provider) => provider.providerId === "google.com"));
 
 const ensureCurrentUser = () => {
@@ -84,7 +93,7 @@ const ensureUserDocument = async (user: User) => {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
-      emailVerified: user.emailVerified,
+      emailVerified: hasVerifiedProvider(user),
       providerIds: user.providerData.map((provider) => provider.providerId),
       lastSignInAt: user.metadata.lastSignInTime ?? null,
       updatedAt: serverTimestamp(),
@@ -180,9 +189,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(ensureFirebaseAuth().currentUser);
   }, []);
 
-  const startMockSubscription = useCallback(async () => {
+  const startMockSubscription = useCallback(async (
+    productId?: Exclude<SubscriptionProductId, "free">
+  ) => {
     const currentUser = ensureCurrentUser();
-    const nextSubscription = await activateMockSubscription(currentUser);
+    const nextSubscription = await activateMockSubscription(currentUser, productId);
     setSubscription(nextSubscription);
     await ensureUserDocument(currentUser);
     return nextSubscription;
@@ -193,7 +204,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       subscription,
       isLoggedIn: Boolean(user),
-      hasFullAccess: hasVerifiedProvider(user) && isPremiumSubscription(subscription),
+      hasFullAccess:
+        hasTestAccountOverride(user) ||
+        (hasVerifiedProvider(user) && isPremiumSubscription(subscription)),
       isAuthLoading,
       isFirebaseReady: isFirebaseConfigured && Boolean(firebaseAuth),
       signIn,

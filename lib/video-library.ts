@@ -1,5 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
+import { localStorageAdapter } from "@/lib/local-storage";
 import type { MadeVideoItem } from "@/types/video";
 
 const VIDEO_STORAGE_KEY = "travel-frame.videos.v1";
@@ -27,11 +26,11 @@ const parseVideos = (value: string | null): MadeVideoItem[] => {
 };
 
 const writeVideos = async (videos: MadeVideoItem[]) => {
-  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(sortVideos(videos)));
+  await localStorageAdapter.setItem(VIDEO_STORAGE_KEY, JSON.stringify(sortVideos(videos)));
 };
 
 export const getMadeVideos = async () => {
-  const value = await AsyncStorage.getItem(VIDEO_STORAGE_KEY);
+  const value = await localStorageAdapter.getItem(VIDEO_STORAGE_KEY);
   return parseVideos(value);
 };
 

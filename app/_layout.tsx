@@ -1,13 +1,19 @@
 import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider } from "@/lib/auth-context";
 import { useAppAppearance } from "@/lib/app-appearance";
+import { initializeAdMob } from "@/lib/admob-config";
 
 function AppStack() {
   const { palette, effectiveThemeMode } = useAppAppearance();
+
+  useEffect(() => {
+    void initializeAdMob();
+  }, []);
 
   return (
     <>

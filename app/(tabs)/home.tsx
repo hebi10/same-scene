@@ -12,6 +12,7 @@ import {
   View
 } from "react-native";
 
+import { AdBanner } from "@/components/ad-banner";
 import { ScreenShell } from "@/components/screen-shell";
 import { colors, typography } from "@/constants/app-theme";
 
@@ -143,6 +144,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </View>
+      <AdBanner placement="home" />
     </ScreenShell>
   );
 }

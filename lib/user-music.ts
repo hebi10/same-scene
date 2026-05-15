@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { type User } from "firebase/auth";
@@ -13,6 +12,7 @@ import {
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import { firestore, firebaseStorage } from "@/lib/firebase";
+import { localStorageAdapter } from "@/lib/local-storage";
 
 export type UserMusicTrack = {
   id: string;
@@ -82,7 +82,7 @@ const getContentType = (mimeType?: string | null) =>
   mimeType && mimeType.startsWith("audio/") ? mimeType : "audio/mpeg";
 
 const saveTracksToCache = async (userId: string, tracks: UserMusicTrack[]) => {
-  await AsyncStorage.setItem(getMusicCacheKey(userId), JSON.stringify(tracks));
+  await localStorageAdapter.setItem(getMusicCacheKey(userId), JSON.stringify(tracks));
 };
 
 export const getUserMusicTracks = async (userId?: string | null) => {
@@ -90,7 +90,7 @@ export const getUserMusicTracks = async (userId?: string | null) => {
     return [];
   }
 
-  const value = await AsyncStorage.getItem(getMusicCacheKey(userId));
+  const value = await localStorageAdapter.getItem(getMusicCacheKey(userId));
   if (!value) {
     return [];
   }

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>트래블프레임 관리자</title>
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <p class="eyebrow">TravelFrame Admin</p>
+          <h1>트래블프레임 관리자</h1>
+          <p>사용자 구독, 백업 상태, Play Store 제출용 문서를 한곳에서 확인하고 운영합니다.</p>
+        </div>
+        <nav class="nav" aria-label="관리자 링크">
+          <a class="button secondary" href="/privacy/">개인정보처리방침</a>
+          <a class="button secondary" href="/privacy/photo-guide-delete-account">계정 삭제 안내</a>
+          <button id="signOutButton" class="secondary hidden" type="button">로그아웃</button>
+        </nav>
+      </header>
+
+      <section id="authLoadingPanel" class="panel strong loading-panel">
+        <p class="eyebrow">CHECKING</p>
+        <h2>권한 확인 중입니다</h2>
+        <p>로그인 상태와 관리자 권한을 확인하고 있습니다. 잠시만 기다려 주세요.</p>
+      </section>
+
+      <section id="loginPanel" class="auth-layout hidden">
+        <div class="panel strong auth-copy">
+          <p class="eyebrow">ACCOUNT</p>
+          <h2>계정 접근</h2>
+          <p>
+            관리자는 운영 페이지에 접근하고, 일반 사용자는 앱 이용을 위한 계정을 만들 수 있습니다.
+            관리자 권한은 회원가입만으로 부여되지 않습니다.
+          </p>
+          <div class="notice">
+            <strong>첫 관리자 등록</strong>
+            <p>
+              Firebase Console에서 직접 <code>admins/관리자UID</code> 문서를 만들고
+              <code>email</code>, <code>role</code> 값을 넣어 주세요.
+            </p>
+          </div>
+        </div>
+
+        <section class="panel auth-card">
+          <div class="tabs" role="tablist" aria-label="로그인 유형">
+            <button
+              id="adminAuthTab"
+              class="tab active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="adminAuthPanel"
+            >
+              관리자 로그인
+            </button>
+            <button
+              id="signupAuthTab"
+              class="tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="signupAuthPanel"
+            >
+              일반 회원가입
+            </button>
+          </div>
+
+          <div id="adminAuthPanel" class="auth-tab-panel" role="tabpanel" aria-labelledby="adminAuthTab">
+            <div>
+              <h2>관리자 로그인</h2>
+              <p>
+                Firebase Auth 계정으로 로그인합니다. Firestore의 <strong>admins/{uid}</strong>
+                문서가 있는 계정만 관리자 페이지에 접근할 수 있습니다.
+              </p>
+            </div>
+            <form id="loginForm" class="form">
+              <label>
+                이메일
+                <input id="emailInput" type="email" autocomplete="email" required />
+              </label>
+              <label>
+                비밀번호
+                <input id="passwordInput" type="password" autocomplete="current-password" required />
+              </label>
+              <button type="submit">로그인</button>
+              <p id="loginMessage" class="message"></p>
+            </form>
+          </div>
+
+          <div
+            id="signupAuthPanel"
+            class="auth-tab-panel hidden"
+            role="tabpanel"
+            aria-labelledby="signupAuthTab"
+          >
+            <div>
+              <h2>일반 회원가입</h2>
+              <p>
+                앱을 처음 사용하는 고객용 계정을 만듭니다. 가입 후 이메일 인증 메일이 발송되며,
+                관리자 페이지 접근 권한은 부여되지 않습니다.
+              </p>
+            </div>
+            <form id="signupForm" class="form">
+              <label>
+                이메일
+                <input id="signupEmailInput" type="email" autocomplete="email" required />
+              </label>
+              <label>
+                비밀번호
+                <input
+                  id="signupPasswordInput"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  placeholder="6자리 이상"
+                  required
+                />
+              </label>
+              <button class="secondary" type="submit">일반 회원가입</button>
+              <p id="signupMessage" class="message"></p>
+            </form>
+            <div class="notice compact-notice">
+              <strong>인증 메일이 오지 않을 때</strong>
+              <p>
+                이미 가입한 이메일이라면 위에 이메일과 비밀번호를 입력하고 인증 메일을 다시 보낼 수 있습니다.
+              </p>
+              <button id="resendVerificationButton" class="secondary" type="button">
+                인증 메일 다시 보내기
+              </button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="adminPanel" class="hidden">
+        <div class="stats">
+          <div class="stat">
+            <span class="meta">전체 사용자</span>
+            <strong id="statUsers">0</strong>
+          </div>
+          <div class="stat">
+            <span class="meta">현재 플랜</span>
+            <strong id="statPlan">-</strong>
+          </div>
+          <div class="stat">
+            <span class="meta">백업 사진</span>
+            <strong id="statBackups">-</strong>
+          </div>
+          <div class="stat">
+            <span class="meta">구독 상태</span>
+            <strong id="statStatus">-</strong>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="stack">
+            <section class="panel strong">
+              <div class="section-heading">
+                <div>
+                  <h2>사용자 선택</h2>
+                  <p>가입한 사용자를 자동으로 불러옵니다. 목록에서 사용자를 선택해 관리하세요.</p>
+                </div>
+                <button id="refreshUsersButton" class="secondary" type="button">새로고침</button>
+              </div>
+              <label>
+                사용자 필터
+                <input id="userFilterInput" placeholder="이메일, 이름, UID로 필터" />
+              </label>
+              <div id="userList" class="user-list" aria-live="polite"></div>
+              <div class="pagination" aria-label="사용자 목록 페이지 이동">
+                <button id="prevUsersPageButton" class="secondary" type="button">이전</button>
+                <span id="usersPageInfo" class="meta">-</span>
+                <button id="nextUsersPageButton" class="secondary" type="button">다음</button>
+              </div>
+              <p id="userListMessage" class="message"></p>
+            </section>
+
+            <section class="panel">
+              <h2>직접 검색</h2>
+              <form id="searchForm" class="form">
+                <label>
+                  이메일 또는 UID
+                  <input id="searchInput" placeholder="user@example.com 또는 uid" required />
+                </label>
+                <button type="submit">검색</button>
+              </form>
+              <p id="searchMessage" class="message"></p>
+            </section>
+
+            <section class="panel">
+              <h2>운영 링크</h2>
+              <div class="list">
+                <a class="item" href="/privacy/">
+                  <strong>개인정보처리방침</strong>
+                  <span class="meta">Play Console 개인정보처리방침 URL로 사용할 수 있습니다.</span>
+                </a>
+                <a class="item" href="/privacy/photo-guide-delete-account">
+                  <strong>계정 및 데이터 삭제 요청</strong>
+                  <span class="meta">Play Console 데이터 삭제 URL로 사용할 수 있습니다.</span>
+                </a>
+                <a class="item" href="https://console.firebase.google.com/" target="_blank" rel="noreferrer">
+                  <strong>Firebase Console</strong>
+                  <span class="meta">관리자 문서, 인증 사용자, 원본 데이터를 확인합니다.</span>
+                </a>
+              </div>
+            </section>
+          </div>
+
+          <div class="stack">
+            <section id="userPanel" class="panel strong hidden">
+              <h2>사용자 상세</h2>
+              <div class="list compact">
+                <div class="item">
+                  <span class="meta">UID</span>
+                  <strong id="userUid">-</strong>
+                </div>
+                <div class="item">
+                  <span class="meta">이메일</span>
+                  <strong id="userEmail">-</strong>
+                </div>
+                <div class="item">
+                  <span class="meta">이름</span>
+                  <strong id="userName">-</strong>
+                </div>
+                <div class="item">
+                  <span class="meta">마지막 로그인</span>
+                  <strong id="userLastSignIn">-</strong>
+                </div>
+              </div>
+            </section>
+
+            <section id="subscriptionPanel" class="panel hidden">
+              <h2>구독 관리</h2>
+              <form id="subscriptionForm" class="form">
+                <label>
+                  플랜
+                  <select id="planSelect">
+                    <option value="free">무료</option>
+                    <option value="ad_remove">광고 제거 1회 결제</option>
+                    <option value="creator_monthly">영상 내보내기 월결제</option>
+                  </select>
+                </label>
+                <label>
+                  상태
+                  <select id="statusSelect">
+                    <option value="inactive">비활성</option>
+                    <option value="active">활성</option>
+                    <option value="expired">만료</option>
+                  </select>
+                </label>
+                <label>
+                  만료일
+                  <input id="expiresInput" type="date" />
+                </label>
+                <label>
+                  관리자 메모
+                  <textarea id="adminNoteInput" placeholder="처리 사유, 테스트 계정 메모 등을 남겨 주세요."></textarea>
+                </label>
+                <button type="submit">구독 저장</button>
+              </form>
+              <p id="subscriptionMessage" class="message"></p>
+            </section>
+
+            <section id="backupPanel" class="panel hidden">
+              <h2>백업 관리</h2>
+              <div class="list compact">
+                <div class="item">
+                  <span class="meta">백업 상태</span>
+                  <strong id="backupStatus">-</strong>
+                </div>
+                <div class="item">
+                  <span class="meta">삭제 예정일</span>
+                  <strong id="backupDeleteAfter">-</strong>
+                </div>
+                <div class="item">
+                  <span class="meta">백업 수량</span>
+                  <strong id="backupCounts">-</strong>
+                </div>
+              </div>
+              <div class="row">
+                <button id="markBackupExpiredButton" class="secondary" type="button">만료 표시</button>
+                <button id="deleteBackupButton" type="button">백업 문서 삭제 처리</button>
+              </div>
+              <p class="meta">
+                Storage 원본 파일의 완전 자동 삭제는 추후 Cloud Functions 또는 Scheduler로 분리하는 것이 안전합니다.
+              </p>
+              <p id="backupMessage" class="message"></p>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/admin.js"></script>
+  </body>
+</html>

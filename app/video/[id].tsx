@@ -11,6 +11,7 @@ import {
   View
 } from "react-native";
 
+import { AdBanner } from "@/components/ad-banner";
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
 import { getUserFacingErrorMessage } from "@/lib/user-facing-error";
 import { getMadeVideoById } from "@/lib/video-library";
@@ -158,6 +159,7 @@ export default function VideoDetailScreen() {
             </Text>
           ) : null}
         </View>
+        <AdBanner placement="video_detail" compact />
       </ScrollView>
     </>
   );

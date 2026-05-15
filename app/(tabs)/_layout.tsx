@@ -2,11 +2,15 @@ import { Tabs } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TabGlyph } from "@/components/tab-glyph";
+import { useAuth } from "@/lib/auth-context";
 import { useAppAppearance } from "@/lib/app-appearance";
+
+const MAX_APP_WIDTH = 750;
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const { palette } = useAppAppearance();
+  const { isLoggedIn } = useAuth();
   const tabBarBottomPadding = Math.max(insets.bottom + 10, 18);
   const tabBarHeight = 72 + tabBarBottomPadding;
 
@@ -25,6 +29,9 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: palette.faint,
         tabBarStyle: {
           height: tabBarHeight,
+          width: "100%",
+          maxWidth: MAX_APP_WIDTH,
+          alignSelf: "center",
           paddingTop: 8,
           paddingBottom: tabBarBottomPadding,
           backgroundColor: palette.background,
@@ -64,7 +71,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="account"
         options={{
-          title: "로그인",
+          title: isLoggedIn ? "마이페이지" : "로그인",
           tabBarIcon: ({ focused }) => <TabGlyph kind="account" focused={focused} />
         }}
       />

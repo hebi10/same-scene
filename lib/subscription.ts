@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { localStorageAdapter } from "@/lib/local-storage";
 import { type User } from "firebase/auth";
 import {
   addDoc,
@@ -13,11 +13,13 @@ import { firestore } from "@/lib/firebase";
 
 export type SubscriptionPlan = "free" | "premium";
 export type SubscriptionStatus = "inactive" | "active" | "expired";
+export type SubscriptionProductId = "free" | "ad_remove" | "creator_monthly";
 
 export type UserSubscription = {
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
   provider: "none" | "mock";
+  productId: SubscriptionProductId;
   startedAt: string | null;
   expiresAt: string | null;
   lastPaymentAt: string | null;
@@ -32,6 +34,7 @@ export const freeSubscription: UserSubscription = {
   plan: "free",
   status: "inactive",
   provider: "none",
+  productId: "free",
   startedAt: null,
   expiresAt: null,
   lastPaymentAt: null,
@@ -49,6 +52,31 @@ export const isPremiumSubscription = (subscription: UserSubscription | null) => 
   }
 
   return new Date(subscription.expiresAt).getTime() > Date.now();
+};
+
+export const isCreatorSubscriptionActive = (subscription: UserSubscription | null) => {
+  if (!isPremiumSubscription(subscription)) {
+    return false;
+  }
+
+  return subscription?.productId === "creator_monthly";
+};
+
+export const isAdFreeSubscription = (subscription: UserSubscription | null) => {
+  if (!isPremiumSubscription(subscription)) {
+    return false;
+  }
+
+  return (
+    subscription?.productId === "ad_remove" ||
+    subscription?.productId === "creator_monthly"
+  );
+};
+
+export const getBackupDeleteAfter = (expiresAt?: string | null) => {
+  const baseDate = expiresAt ? new Date(expiresAt) : new Date();
+  baseDate.setMonth(baseDate.getMonth() + 3);
+  return baseDate.toISOString();
 };
 
 const parseSubscription = (value: string | null): UserSubscription => {
@@ -72,7 +100,7 @@ export const getLocalSubscription = async (uid?: string | null) => {
     return freeSubscription;
   }
 
-  const value = await AsyncStorage.getItem(createSubscriptionStorageKey(uid));
+  const value = await localStorageAdapter.getItem(createSubscriptionStorageKey(uid));
   return parseSubscription(value);
 };
 
@@ -95,6 +123,21 @@ export const getUserSubscription = async (user: User | null) => {
     }
 
     const subscription = parseSubscription(JSON.stringify(snapshot.data()));
+
+    if (!isCreatorSubscriptionActive(subscription)) {
+      const adRemoveSnapshot = await getDoc(
+        doc(firestore, "users", user.uid, "subscriptions", "ad_remove")
+      );
+      const adRemoveSubscription = adRemoveSnapshot.exists()
+        ? parseSubscription(JSON.stringify(adRemoveSnapshot.data()))
+        : null;
+
+      if (adRemoveSubscription && isAdFreeSubscription(adRemoveSubscription)) {
+        await saveLocalSubscription(user.uid, adRemoveSubscription);
+        return adRemoveSubscription;
+      }
+    }
+
     await saveLocalSubscription(user.uid, subscription);
     return subscription;
   } catch {
@@ -103,7 +146,7 @@ export const getUserSubscription = async (user: User | null) => {
 };
 
 const saveLocalSubscription = async (uid: string, subscription: UserSubscription) => {
-  await AsyncStorage.setItem(
+  await localStorageAdapter.setItem(
     createSubscriptionStorageKey(uid),
     JSON.stringify(subscription)
   );
@@ -115,26 +158,39 @@ const addMonths = (date: Date, months: number) => {
   return nextDate;
 };
 
-export const activateMockSubscription = async (user: User) => {
+export const activateMockSubscription = async (
+  user: User,
+  productId: Exclude<SubscriptionProductId, "free"> = "creator_monthly"
+) => {
   if (!firestore) {
     throw new Error("Firestore가 설정되지 않았습니다.");
   }
 
   const now = new Date();
-  const expiresAt = addMonths(now, 1);
+  const isCreator = productId === "creator_monthly";
+  const expiresAt = isCreator ? addMonths(now, 1).toISOString() : null;
   const subscription: UserSubscription = {
     plan: "premium",
     status: "active",
     provider: "mock",
+    productId,
     startedAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
+    expiresAt,
     lastPaymentAt: now.toISOString(),
-    priceLabel: "월 4,900원",
-    productName: "트래블프레임 프리미엄"
+    priceLabel: isCreator ? "월 3,900원" : "3,900원",
+    productName: isCreator ? "영상 내보내기" : "광고 제거"
   };
 
+  const currentRef = doc(firestore, "users", user.uid, "subscriptions", "current");
+  const currentSnapshot = await getDoc(currentRef);
+  const currentSubscription = currentSnapshot.exists()
+    ? parseSubscription(JSON.stringify(currentSnapshot.data()))
+    : freeSubscription;
+  const shouldReplaceCurrent =
+    productId === "creator_monthly" || !isCreatorSubscriptionActive(currentSubscription);
+
   await setDoc(
-    doc(firestore, "users", user.uid, "subscriptions", "current"),
+    doc(firestore, "users", user.uid, "subscriptions", productId),
     {
       ...subscription,
       updatedAt: serverTimestamp()
@@ -142,9 +198,21 @@ export const activateMockSubscription = async (user: User) => {
     { merge: true }
   );
 
+  if (shouldReplaceCurrent) {
+    await setDoc(
+      currentRef,
+      {
+        ...subscription,
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
+
   await addDoc(collection(firestore, "users", user.uid, "paymentEvents"), {
     type: "mock_payment_completed",
     plan: subscription.plan,
+    productId: subscription.productId,
     provider: subscription.provider,
     productName: subscription.productName,
     priceLabel: subscription.priceLabel,
@@ -153,6 +221,9 @@ export const activateMockSubscription = async (user: User) => {
     createdAt: serverTimestamp()
   });
 
-  await saveLocalSubscription(user.uid, subscription);
+  await saveLocalSubscription(
+    user.uid,
+    shouldReplaceCurrent ? subscription : currentSubscription
+  );
   return subscription;
 };

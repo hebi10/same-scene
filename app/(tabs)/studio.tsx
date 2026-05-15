@@ -4,6 +4,7 @@ import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { AdBanner } from "@/components/ad-banner";
 import { ScreenShell } from "@/components/screen-shell";
 import { SectionBlock } from "@/components/section-block";
 import { colors, controls, typography } from "@/constants/app-theme";
@@ -369,6 +370,7 @@ export default function StudioScreen() {
           )}
         </>
       ) : null}
+      <AdBanner placement="studio" />
     </ScreenShell>
   );
 }

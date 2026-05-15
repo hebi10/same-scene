@@ -1,7 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import type { GuideType } from "@/constants/camera-guides";
 import type { TripClipRatio } from "@/constants/trip-clip";
+import { localStorageAdapter } from "@/lib/local-storage";
 
 const APP_SETTINGS_KEY = "travel-frame.settings.v1";
 const settingsListeners = new Set<(settings: AppSettings) => void>();
@@ -105,7 +104,7 @@ const normalizeSettings = (value: Partial<AppSettings> | null): AppSettings => {
 };
 
 export const getAppSettings = async () => {
-  const value = await AsyncStorage.getItem(APP_SETTINGS_KEY);
+  const value = await localStorageAdapter.getItem(APP_SETTINGS_KEY);
 
   if (!value) {
     return defaultAppSettings;
@@ -120,7 +119,10 @@ export const getAppSettings = async () => {
 
 export const saveAppSettings = async (settings: AppSettings) => {
   const normalizedSettings = normalizeSettings(settings);
-  await AsyncStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(normalizedSettings));
+  await localStorageAdapter.setItem(
+    APP_SETTINGS_KEY,
+    JSON.stringify(normalizedSettings)
+  );
   settingsListeners.forEach((listener) => listener(normalizedSettings));
   return normalizedSettings;
 };

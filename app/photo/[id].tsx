@@ -11,6 +11,7 @@ import {
   View
 } from "react-native";
 
+import { AdBanner } from "@/components/ad-banner";
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
 import { deletePhoto, getPhotoById, togglePhotoForVideo } from "@/lib/photo-library";
 import { saveImageToLibrary } from "@/lib/trip-clip-export";
@@ -250,6 +251,7 @@ export default function PhotoDetailScreen() {
           </Text>
         ) : null}
       </View>
+      <AdBanner placement="photo_detail" compact />
     </ScrollView>
   );
 }

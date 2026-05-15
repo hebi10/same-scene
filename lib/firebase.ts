@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, initializeAuth, type Auth, type Persistence } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
@@ -29,7 +29,13 @@ export const firebaseApp: FirebaseApp | null = isFirebaseConfigured
     : initializeApp(firebaseConfig)
   : null;
 
-const getAsyncStoragePersistence = (storage: typeof AsyncStorage) =>
+type AsyncStorageLike = {
+  setItem: (key: string, value: string) => Promise<void>;
+  getItem: (key: string) => Promise<string | null>;
+  removeItem: (key: string) => Promise<void>;
+};
+
+const getAsyncStoragePersistence = (storage: AsyncStorageLike) =>
   class ReactNativeAsyncStoragePersistence {
     static type = "LOCAL";
     readonly type = "LOCAL";
@@ -71,7 +77,13 @@ const createFirebaseAuth = () => {
     return null;
   }
 
+  if (Platform.OS === "web") {
+    return getAuth(firebaseApp);
+  }
+
   try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default as AsyncStorageLike;
     return initializeAuth(firebaseApp, {
       persistence: getAsyncStoragePersistence(AsyncStorage)
     });
@@ -81,6 +93,9 @@ const createFirebaseAuth = () => {
 };
 
 export const firebaseAuth: Auth | null = createFirebaseAuth();
+if (firebaseAuth) {
+  firebaseAuth.languageCode = "ko";
+}
 export const firestore: Firestore | null = firebaseApp ? getFirestore(firebaseApp) : null;
 export const firebaseStorage: FirebaseStorage | null = firebaseApp
   ? getStorage(firebaseApp)

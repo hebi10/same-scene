@@ -21,7 +21,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  UIManager,
   View
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -35,8 +34,8 @@ import Reanimated, {
   withTiming
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { RecordingView, useViewRecorder } from "react-native-view-recorder";
 
+import { InterstitialAdModal } from "@/components/interstitial-ad-modal";
 import { TripClipPreviewPlayer } from "@/components/trip-clip-preview-player";
 import { colors, controls, spacing, typography } from "@/constants/app-theme";
 import {
@@ -81,7 +80,14 @@ import {
   updateImageBundleWork
 } from "@/lib/work-library";
 import { useAuth } from "@/lib/auth-context";
+import {
+  isRecordingViewAvailable,
+  OptionalRecordingView,
+  useOptionalViewRecorder
+} from "@/lib/view-recorder";
 import { backupImageBundleWork, backupMadeVideo } from "@/lib/cloud-backup";
+import { shouldShowAds } from "@/lib/ad-entitlement";
+import { isCreatorSubscriptionActive } from "@/lib/subscription";
 import {
   syncUserMusicTracks,
   type UserMusicTrack
@@ -200,17 +206,6 @@ const getDefaultRenderServerUrl = () => {
 const defaultRenderServerUrl = getDefaultRenderServerUrl();
 const VIEW_RECORDER_FPS = 24;
 const RECORDING_VIEW_WIDTH = 360;
-
-const isRecordingViewAvailable = () => {
-  if (Platform.OS === "web") {
-    return false;
-  }
-
-  return Boolean(
-    UIManager.getViewManagerConfig?.("RecordingView") ??
-      UIManager.getViewManagerConfig?.("RCTRecordingView")
-  );
-};
 
 const ratioAspect: Record<TripClipRatio, number> = {
   "9:16": 9 / 16,
@@ -342,8 +337,8 @@ export default function TripClipScreen() {
     bundleId?: string;
     videoId?: string;
   }>();
-  const recorder = useViewRecorder();
-  const { user, isLoggedIn, hasFullAccess } = useAuth();
+  const recorder = useOptionalViewRecorder();
+  const { user, isLoggedIn, hasFullAccess, subscription } = useAuth();
   const insets = useSafeAreaInsets();
   const bottomSafePadding = Math.max(insets.bottom + 12, 28);
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
@@ -382,6 +377,7 @@ export default function TripClipScreen() {
   const [exportProgress, setExportProgress] =
     useState<ExportProgress>(initialExportProgress);
   const [isExportComingSoonVisible, setIsExportComingSoonVisible] = useState(false);
+  const [isPostSaveAdVisible, setIsPostSaveAdVisible] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [progressSeconds, setProgressSeconds] = useState(0);
   const [recordingFrameIndex, setRecordingFrameIndex] = useState(0);
@@ -1162,7 +1158,7 @@ export default function TripClipScreen() {
 
         let backupWarning: string | null = null;
 
-        if (savedBundle && cloudBackupEnabled && user) {
+        if (savedBundle && cloudBackupEnabled && user && isCreatorSubscriptionActive(subscription)) {
           try {
             setExportProgress({
               visible: true,
@@ -1249,7 +1245,7 @@ export default function TripClipScreen() {
       });
       let backupWarning: string | null = null;
 
-      if (cloudBackupEnabled && user) {
+      if (cloudBackupEnabled && user && isCreatorSubscriptionActive(subscription)) {
         try {
           setExportProgress({
             visible: true,
@@ -1283,6 +1279,9 @@ export default function TripClipScreen() {
           : "저장한 영상을 작업물 목록에서 확인할 수 있습니다.",
         completedVideoId: savedVideo.id
       });
+      if (shouldShowAds(subscription)) {
+        setIsPostSaveAdVisible(true);
+      }
     } catch (error) {
       const message = getUserFacingErrorMessage(error, "저장하지 못했습니다.");
       setExportMessage(message);
@@ -2018,7 +2017,8 @@ export default function TripClipScreen() {
       </ScrollView>
       {recordingViewAvailable ? (
         <View pointerEvents="none" style={styles.recordingHost}>
-          <RecordingView
+          <OptionalRecordingView
+            available={recordingViewAvailable}
             sessionId={recorder.sessionId}
             style={[
               styles.recordingView,
@@ -2034,7 +2034,7 @@ export default function TripClipScreen() {
               transition={transition}
               showWatermark={!hasFullAccess}
             />
-          </RecordingView>
+          </OptionalRecordingView>
         </View>
       ) : null}
       <View
@@ -2194,6 +2194,11 @@ export default function TripClipScreen() {
           </View>
         </View>
       </Modal>
+      <InterstitialAdModal
+        visible={isPostSaveAdVisible}
+        placement="post_video_save"
+        onClose={() => setIsPostSaveAdVisible(false)}
+      />
     </View>
   );
 }

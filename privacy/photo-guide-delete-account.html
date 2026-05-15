@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>트래블프레임 계정 및 데이터 삭제 요청</title>
+    <style>
+      :root {
+        color: #111111;
+        background: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #ffffff;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 48px 20px 72px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 32px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 36px 0 12px;
+        font-size: 20px;
+        line-height: 1.35;
+      }
+      p,
+      li {
+        color: #444444;
+        font-size: 15px;
+        line-height: 1.8;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      a {
+        color: #111111;
+      }
+      .box {
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid #e5e5e5;
+        background: #fafafa;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>트래블프레임 계정 및 데이터 삭제 요청</h1>
+      <p>
+        트래블프레임 계정과 앱 데이터를 삭제하려면 아래 방식으로 요청해 주세요. 요청을 확인한 뒤 계정과
+        서버에 저장된 사용자 데이터를 삭제 처리합니다.
+      </p>
+
+      <section>
+        <h2>1. 삭제 요청 방법</h2>
+        <div class="box">
+          <p>이메일: sevim0104@naver.com</p>
+          <p>메일 제목: [트래블프레임 계정 삭제 요청]</p>
+        </div>
+        <p>메일 본문에는 다음 정보를 적어 주세요.</p>
+        <ul>
+          <li>가입 이메일</li>
+          <li>사용자 UID를 알고 있다면 UID</li>
+          <li>요청 내용: 계정 삭제, 백업 데이터 삭제, 전체 데이터 삭제 중 선택</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>2. 삭제되는 데이터</h2>
+        <ul>
+          <li>Firebase 로그인 계정 정보</li>
+          <li>Firestore에 저장된 사용자 프로필, 설정, 구독 상태, 결제 이벤트 기록</li>
+          <li>사용자가 백업한 사진, 편집 이미지, 영상, 음악 파일</li>
+          <li>앱에서 생성한 작업물 메타데이터</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>3. 삭제되지 않을 수 있는 데이터</h2>
+        <p>
+          사용자가 휴대폰 앨범, 다운로드 폴더, 외부 저장소에 직접 저장한 사진과 영상은 앱 서버에서 삭제할 수
+          없습니다. 해당 파일은 사용자가 기기에서 직접 삭제해야 합니다.
+        </p>
+      </section>
+
+      <section>
+        <h2>4. 처리 기간</h2>
+        <p>
+          요청 접수 후 본인 확인이 완료되면 영업일 기준 7일 이내 처리하는 것을 원칙으로 합니다. 추가 확인이
+          필요한 경우 이메일로 안내합니다.
+        </p>
+      </section>
+
+      <section>
+        <h2>5. 관련 링크</h2>
+        <p><a href="./">개인정보처리방침 보기</a></p>
+      </section>
+    </main>
+  </body>
+</html>

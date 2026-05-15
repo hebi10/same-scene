@@ -1,7 +1,7 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { manipulateAsync, SaveFormat, type Action } from "expo-image-manipulator";
 
+import { localStorageAdapter } from "@/lib/local-storage";
 import type {
   PhotoEditTransform,
   PhotoItem,
@@ -243,11 +243,14 @@ const parsePhotos = (value: string | null): PhotoItem[] => {
 };
 
 const writePhotos = async (photos: PhotoItem[]) => {
-  await AsyncStorage.setItem(PHOTO_STORAGE_KEY, JSON.stringify(sortPhotos(photos)));
+  await localStorageAdapter.setItem(
+    PHOTO_STORAGE_KEY,
+    JSON.stringify(sortPhotos(photos))
+  );
 };
 
 export const getPhotos = async () => {
-  const value = await AsyncStorage.getItem(PHOTO_STORAGE_KEY);
+  const value = await localStorageAdapter.getItem(PHOTO_STORAGE_KEY);
   return parsePhotos(value);
 };
 

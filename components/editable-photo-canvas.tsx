@@ -1,17 +1,21 @@
 import { Image } from "expo-image";
 import * as FileSystem from "expo-file-system/legacy";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
-import { Platform, StyleSheet, UIManager, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useAnimatedStyle,
   useSharedValue
 } from "react-native-reanimated";
-import { RecordingView, useViewRecorder } from "react-native-view-recorder";
 
 import { CameraGuideOverlay } from "@/components/camera-guide-overlay";
 import { colors } from "@/constants/app-theme";
 import type { GuideType } from "@/constants/camera-guides";
+import {
+  isRecordingViewAvailable,
+  OptionalRecordingView,
+  useOptionalViewRecorder
+} from "@/lib/view-recorder";
 import type { PhotoEditTransform, PhotoRatioLabel } from "@/types/photo";
 
 type EditablePhotoCanvasProps = {
@@ -46,17 +50,6 @@ const ratioValue: Record<PhotoRatioLabel, number | null> = {
 };
 
 const SNAPSHOT_MAX_EDGE = 1800;
-
-const isRecordingViewAvailable = () => {
-  if (Platform.OS === "web") {
-    return false;
-  }
-
-  return Boolean(
-    UIManager.getViewManagerConfig?.("RecordingView") ??
-      UIManager.getViewManagerConfig?.("RCTRecordingView")
-  );
-};
 
 const waitForPaint = () =>
   new Promise<void>((resolve) => {
@@ -152,7 +145,7 @@ export const EditablePhotoCanvas = forwardRef<
   guideSize,
   guideColor
 }, ref) {
-  const recorder = useViewRecorder();
+  const recorder = useOptionalViewRecorder();
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
@@ -379,19 +372,14 @@ export const EditablePhotoCanvas = forwardRef<
 
   return (
     <View style={styles.stage} onLayout={handleStageLayout}>
-      {recordingViewAvailable ? (
-        <RecordingView
-          sessionId={recorder.sessionId}
-          style={frameStyle}
-          onLayout={handleFrameLayout}
-        >
-          {frameContent}
-        </RecordingView>
-      ) : (
-        <View style={frameStyle} onLayout={handleFrameLayout}>
-          {frameContent}
-        </View>
-      )}
+      <OptionalRecordingView
+        available={recordingViewAvailable}
+        sessionId={recorder.sessionId}
+        style={frameStyle}
+        onLayout={handleFrameLayout}
+      >
+        {frameContent}
+      </OptionalRecordingView>
     </View>
   );
 });

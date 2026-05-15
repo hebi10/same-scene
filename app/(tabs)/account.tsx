@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -32,6 +33,16 @@ import {
 import { type AppPalette, useAppAppearance } from "@/lib/app-appearance";
 
 type AuthMode = "signIn" | "signUp" | "recover";
+type PaymentPlanId = "adRemove" | "creator";
+
+type PaymentPlan = {
+  id: PaymentPlanId;
+  title: string;
+  price: string;
+  billing: string;
+  summary: string;
+  benefits: string[];
+};
 
 type UsageStats = {
   originalPhotos: number;
@@ -46,6 +57,41 @@ const initialStats: UsageStats = {
   imageBundles: 0,
   videos: 0
 };
+
+const signedInBenefits = [
+  "기본 저장 한도를 6장에서 100장까지 확장",
+  "작업 기록과 계정 정보를 마이페이지에서 확인",
+  "향후 백업과 결제 기능 연결을 위한 계정 준비"
+];
+
+const paymentPlans: PaymentPlan[] = [
+  {
+    id: "adRemove",
+    title: "광고 제거",
+    price: "3,900원",
+    billing: "1회 결제",
+    summary: "한 번 결제로 광고 없이 앱을 사용합니다.",
+    benefits: [
+      "앱 전반의 광고 제거",
+      "촬영과 편집 화면을 방해 없이 사용",
+      "한 번 결제 후 계속 적용"
+    ]
+  },
+  {
+    id: "creator",
+    title: "영상 내보내기",
+    price: "월 3,900원",
+    billing: "월결제",
+    summary: "월 결제로 영상 내보내기와 백업 기능을 사용합니다.",
+    benefits: [
+      "편집 화면에서 영상으로 내보내기 가능",
+      "저장 한도를 200장까지 확장",
+      "여러 사진 작업과 영상 작업 백업 가능",
+      "빠른 영상 저장 지원",
+      "구독 기간 동안 워터마크 제거 옵션과 연동 가능"
+    ]
+  }
+];
 
 const formatDateTime = (value?: string | null) => {
   if (!value) {
@@ -133,6 +179,7 @@ export default function AccountScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [isMusicSubmitting, setIsMusicSubmitting] = useState(false);
+  const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<PaymentPlan | null>(null);
   const [stats, setStats] = useState<UsageStats>(initialStats);
   const [musicTracks, setMusicTracks] = useState<UserMusicTrack[]>([]);
   const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
@@ -347,15 +394,17 @@ export default function AccountScreen() {
     runAuthAction(() => updateName(displayName), "이름을 저장했습니다.");
   };
 
-  const handleMockPayment = () => {
+  const handleMockPayment = (plan: PaymentPlan) => {
     if (!user) {
-      setMessage("로그인 후 구독 결제를 진행해 주세요.");
+      setSelectedPaymentPlan(null);
+      setMessage("로그인 후 결제를 진행해 주세요.");
       return;
     }
 
     runAuthAction(async () => {
-      await startMockSubscription();
-    }, "테스트 결제가 완료되었습니다. Firestore에 결제 기록을 저장했습니다.");
+      await startMockSubscription(plan.id === "creator" ? "creator_monthly" : "ad_remove");
+    }, `${plan.title} 결제가 완료되었습니다. 결제 기록을 저장했습니다.`);
+    setSelectedPaymentPlan(null);
   };
 
   const handleUploadMusic = async () => {
@@ -395,16 +444,17 @@ export default function AccountScreen() {
   };
 
   return (
-    <ScreenShell
-      eyebrow="계정"
-      title={isLoggedIn ? "내 계정과 사용 기록" : "로그인하고 작업을 보관하세요."}
-      description={
-        isLoggedIn
-          ? "이메일 인증, 구독 상태, 저장한 작업 기록을 한곳에서 확인합니다."
-          : "이메일 인증 후 프리미엄을 활성화하면 워터마크 없이 저장하고 작업 백업을 사용할 수 있습니다."
-      }
-      safeTop
-    >
+    <>
+      <ScreenShell
+        eyebrow="계정"
+        title={isLoggedIn ? "내 계정과 사용 기록" : "로그인하고 작업을 보관하세요."}
+        description={
+          isLoggedIn
+            ? "이메일 인증, 구독 상태, 저장한 작업 기록을 한곳에서 확인합니다."
+            : "이메일 인증 후 프리미엄을 활성화하면 워터마크 없이 저장하고 작업 백업을 사용할 수 있습니다."
+        }
+        safeTop
+      >
       {!isFirebaseReady ? (
         <SectionBlock title="연결 필요">
           <View style={[styles.noticePanel, themed.panel]}>
@@ -602,45 +652,59 @@ export default function AccountScreen() {
             </View>
           </SectionBlock>
 
-          <SectionBlock title="구독 결제">
+          <SectionBlock title="결제">
             <View style={[styles.planCard, themed.panelStrong]}>
               <View style={styles.planHeader}>
                 <View style={styles.planCopy}>
                   <Text selectable style={[styles.planTitle, themed.text]}>
-                    트래블프레임 프리미엄
+                    로그인 혜택
                   </Text>
                   <Text selectable style={[styles.planPrice, themed.text]}>
-                    월 4,900원
+                    무료
                   </Text>
                 </View>
-                <StatusBadge
-                  label={subscription.status === "active" ? "이용 중" : "테스트"}
-                  active={subscription.status === "active"}
-                />
+                <StatusBadge label={isLoggedIn ? "사용 중" : "로그인 필요"} active={isLoggedIn} />
               </View>
               <View style={styles.benefitList}>
-                <Text selectable style={[styles.benefitText, themed.mutedText]}>
-                  이메일 인증 후 워터마크 없이 MP4 저장
-                </Text>
-                <Text selectable style={[styles.benefitText, themed.mutedText]}>
-                  영상 만들기와 클라우드 백업 이용
-                </Text>
-                <Text selectable style={[styles.benefitText, themed.mutedText]}>
-                  향후 실제 결제 승인 후 같은 구독 상태로 연결
-                </Text>
+                {signedInBenefits.map((benefit) => (
+                  <Text key={benefit} selectable style={[styles.benefitText, themed.mutedText]}>
+                    {benefit}
+                  </Text>
+                ))}
               </View>
-              <Text selectable style={[styles.helpText, themed.mutedText]}>
-                현재는 실제 결제가 아닌 테스트 결제입니다. 버튼을 누르면 결제 완료처럼 처리하고 Firestore에 기록을 남깁니다.
-              </Text>
-              <Pressable
-                disabled={isSubmitting}
-                style={[styles.primaryButton, themed.activeFill, isSubmitting && styles.disabledButton]}
-                onPress={handleMockPayment}
-              >
-                <Text selectable={false} style={[styles.primaryButtonText, themed.inverseText]}>
-                  {subscription.status === "active" ? "테스트 결제 다시 기록" : "테스트 결제하기"}
-                </Text>
-              </Pressable>
+            </View>
+
+            <View style={styles.paymentGrid}>
+              {paymentPlans.map((plan) => (
+                <Pressable
+                  key={plan.id}
+                  style={[styles.paymentPlan, themed.panel]}
+                  onPress={() => setSelectedPaymentPlan(plan)}
+                >
+                  <View style={styles.planHeader}>
+                    <View style={styles.planCopy}>
+                      <Text selectable style={[styles.planTitle, themed.text]}>
+                        {plan.title}
+                      </Text>
+                      <Text selectable style={[styles.planPrice, themed.text]}>
+                        {plan.price}
+                      </Text>
+                    </View>
+                    <StatusBadge
+                      label={subscription.status === "active" ? "이용 중" : plan.billing}
+                      active={subscription.status === "active"}
+                    />
+                  </View>
+                  <Text selectable style={[styles.benefitText, themed.mutedText]}>
+                    {plan.summary}
+                  </Text>
+                  <View style={[styles.paymentOpenButton, themed.activeFill]}>
+                    <Text selectable={false} style={[styles.primaryButtonText, themed.inverseText]}>
+                      자세히 보기
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
             </View>
           </SectionBlock>
 
@@ -795,7 +859,67 @@ export default function AccountScreen() {
           </Text>
         </View>
       ) : null}
-    </ScreenShell>
+      </ScreenShell>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={Boolean(selectedPaymentPlan)}
+        onRequestClose={() => setSelectedPaymentPlan(null)}
+      >
+        <View style={styles.paymentModalBackdrop}>
+          <View style={[styles.paymentModalPanel, themed.panelStrong]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.planCopy}>
+                <Text selectable style={[styles.planTitle, themed.text]}>
+                  {selectedPaymentPlan?.title}
+                </Text>
+                <Text selectable style={[styles.planPrice, themed.text]}>
+                  {selectedPaymentPlan?.price}
+                </Text>
+                <Text selectable style={[styles.benefitText, themed.mutedText]}>
+                  {selectedPaymentPlan?.billing}
+                </Text>
+              </View>
+              <Pressable
+                style={[styles.modalCloseButton, themed.secondaryButton]}
+                onPress={() => setSelectedPaymentPlan(null)}
+              >
+                <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
+                  닫기
+                </Text>
+              </Pressable>
+            </View>
+
+            <Text selectable style={[styles.helpText, themed.mutedText]}>
+              {selectedPaymentPlan?.summary}
+            </Text>
+
+            <View style={styles.benefitList}>
+              {selectedPaymentPlan?.benefits.map((benefit) => (
+                <Text key={benefit} selectable style={[styles.benefitText, themed.text]}>
+                  {benefit}
+                </Text>
+              ))}
+            </View>
+
+            <Pressable
+              disabled={isSubmitting || !selectedPaymentPlan}
+              style={[styles.primaryButton, themed.activeFill, isSubmitting && styles.disabledButton]}
+              onPress={() => {
+                if (selectedPaymentPlan) {
+                  handleMockPayment(selectedPaymentPlan);
+                }
+              }}
+            >
+              <Text selectable={false} style={[styles.primaryButtonText, themed.inverseText]}>
+                결제하기
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -1095,6 +1219,16 @@ const styles = StyleSheet.create({
     gap: 14,
     backgroundColor: colors.background
   },
+  paymentGrid: {
+    gap: 10
+  },
+  paymentPlan: {
+    padding: spacing.row,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 12,
+    backgroundColor: colors.background
+  },
   planHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1126,6 +1260,37 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     lineHeight: 18,
     letterSpacing: 0
+  },
+  paymentOpenButton: {
+    minHeight: controls.compactHeight,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  paymentModalBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    padding: 14,
+    backgroundColor: "rgba(0, 0, 0, 0.36)"
+  },
+  paymentModalPanel: {
+    gap: 16,
+    padding: spacing.screen,
+    borderWidth: 1,
+    borderColor: colors.text,
+    backgroundColor: colors.background
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  modalCloseButton: {
+    minHeight: controls.compactHeight,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.line
   },
   statsGrid: {
     flexDirection: "row",

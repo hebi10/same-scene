@@ -10,6 +10,11 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
     function isCurrentUserDocument(userId) {
       return request.resource.data.uid == userId;
     }
@@ -26,8 +31,14 @@ service cloud.firestore {
         && request.resource.data.plan == "premium";
     }
 
+    function isAdminSubscriptionDocument(subscriptionId) {
+      return subscriptionId == "current"
+        || subscriptionId == "ad_remove"
+        || subscriptionId == "creator_monthly";
+    }
+
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId) && isCurrentUserDocument(userId);
       allow update: if isOwner(userId)
         && resource.data.uid == userId
@@ -35,37 +46,52 @@ service cloud.firestore {
       allow delete: if false;
 
       match /videos/{videoId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
       }
 
       match /imageWorks/{workId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
       }
 
       match /musicTracks/{trackId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /backups/{backupId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /photoBackups/{photoId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
       }
 
       match /subscriptions/{subscriptionId} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
 
         // Temporary client-side mock payment flow.
         // Replace create/update with trusted server-only writes when real billing is added.
         allow create, update: if isOwner(userId)
-          && subscriptionId == "current"
+          && isAdminSubscriptionDocument(subscriptionId)
           && isMockSubscription();
+        allow create, update: if isAdmin() && isAdminSubscriptionDocument(subscriptionId);
 
-        allow delete: if false;
+        allow delete: if isAdmin();
       }
 
       match /paymentEvents/{eventId} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
 
         // Temporary client-side mock payment flow.
         // Real payment events should be written by Cloud Functions or a verified server.
         allow create: if isOwner(userId) && isMockPaymentEvent();
+        allow create: if isAdmin();
         allow update, delete: if false;
       }
+    }
+
+    match /admins/{adminId} {
+      allow read: if isOwner(adminId);
+      allow write: if false;
     }
 
     match /{document=**} {

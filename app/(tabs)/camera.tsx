@@ -5,13 +5,14 @@ import {
   useCameraPermissions
 } from "expo-camera";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
   ActivityIndicator,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +21,7 @@ import {
   View
 } from "react-native";
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useSharedValue
 } from "react-native-reanimated";
@@ -44,8 +46,9 @@ import {
   getAppSettings,
   updateAppSettings
 } from "@/lib/app-settings";
-import { createCaptureDraft } from "@/lib/photo-library";
+import { createCaptureDraft, getRecentPhoto } from "@/lib/photo-library";
 import { getUserFacingErrorMessage } from "@/lib/user-facing-error";
+import type { PhotoItem } from "@/types/photo";
 
 const GUIDE_SIZE_OPTIONS = [
   { label: "작게", value: 34 },
@@ -139,6 +142,7 @@ export default function CameraScreen() {
   const [overlaySetupActive, setOverlaySetupActive] = useState(false);
   const [overlayLocked, setOverlayLocked] = useState(false);
   const [overlayResetKey, setOverlayResetKey] = useState(0);
+  const [recentPhoto, setRecentPhoto] = useState<PhotoItem | null>(null);
   const insets = useSafeAreaInsets();
   const bottomSafePadding = Math.max(insets.bottom + 10, 24);
   const isCameraModalOpen = guideSettingsOpen || cameraSettingsOpen || navigationOpen;
@@ -206,7 +210,10 @@ export default function CameraScreen() {
       let isActive = true;
 
       const loadSettings = async () => {
-        const settings = await getAppSettings();
+        const [settings, latestPhoto] = await Promise.all([
+          getAppSettings(),
+          getRecentPhoto()
+        ]);
         if (!isActive) {
           return;
         }
@@ -218,6 +225,7 @@ export default function CameraScreen() {
         setGuideSizeInput(String(settings.guideSize));
         setGuideColor(settings.guideColor);
         setOverlayOpacity(settings.overlayOpacity);
+        setRecentPhoto(latestPhoto);
       };
 
       loadSettings();
@@ -399,41 +407,32 @@ export default function CameraScreen() {
     router.push(href);
   };
 
-  const cameraSwipePanResponder = useMemo(
+  const openPersonalGallery = () => {
+    router.push("/studio");
+  };
+
+  const cameraSwipeGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-          if (
-            isCameraModalOpen ||
-            cameraMenuOpen ||
-            overlaySetupActive ||
-            isCapturing
-          ) {
-            return false;
-          }
-
-          const verticalDistance = Math.abs(gestureState.dy);
-          const horizontalDistance = Math.abs(gestureState.dx);
-
-          return (
-            verticalDistance > CAMERA_FLIP_SWIPE_THRESHOLD &&
-            verticalDistance > horizontalDistance * CAMERA_FLIP_HORIZONTAL_TOLERANCE
-          );
-        },
-        onPanResponderRelease: (_, gestureState) => {
-          const verticalDistance = Math.abs(gestureState.dy);
-          const horizontalDistance = Math.abs(gestureState.dx);
+      Gesture.Pan()
+        .enabled(
+          !isCameraModalOpen &&
+            !cameraMenuOpen &&
+            !overlaySetupActive &&
+            !isCapturing
+        )
+        .activeOffsetY([-CAMERA_FLIP_SWIPE_THRESHOLD, CAMERA_FLIP_SWIPE_THRESHOLD])
+        .failOffsetX([-CAMERA_FLIP_SWIPE_THRESHOLD, CAMERA_FLIP_SWIPE_THRESHOLD])
+        .onEnd((event) => {
+          const verticalDistance = Math.abs(event.translationY);
+          const horizontalDistance = Math.abs(event.translationX);
 
           if (
             verticalDistance > CAMERA_FLIP_SWIPE_THRESHOLD &&
             verticalDistance > horizontalDistance * CAMERA_FLIP_HORIZONTAL_TOLERANCE
           ) {
-            toggleCameraFacingBySwipe();
+            runOnJS(toggleCameraFacingBySwipe)();
           }
-        },
-        onPanResponderTerminationRequest: () => true
-      }),
+        }),
     [
       cameraMenuOpen,
       isCameraModalOpen,
@@ -505,11 +504,13 @@ export default function CameraScreen() {
         resetKey={overlayResetKey}
       />
 
-      <View
-        pointerEvents={isCameraModalOpen || overlaySetupActive ? "none" : "box-only"}
-        style={styles.cameraSwipeLayer}
-        {...cameraSwipePanResponder.panHandlers}
-      />
+      <GestureDetector gesture={cameraSwipeGesture}>
+        <View
+          collapsable={false}
+          pointerEvents={isCameraModalOpen || overlaySetupActive ? "none" : "box-only"}
+          style={styles.cameraSwipeLayer}
+        />
+      </GestureDetector>
 
       {countdown ? (
         <View style={styles.countdownOverlay}>
@@ -1048,6 +1049,18 @@ export default function CameraScreen() {
           </View>
         ) : (
           <>
+            {referenceUri ? (
+              <View style={styles.captureOpacityControl}>
+                <SmoothValueSlider
+                  value={Math.round(overlayOpacity * 100)}
+                  min={OVERLAY_OPACITY_MIN}
+                  max={OVERLAY_OPACITY_MAX}
+                  label="투명도"
+                  compact
+                  onCommit={applyOverlayOpacityPercent}
+                />
+              </View>
+            ) : null}
             <View style={styles.captureZoomControl}>
               <SmoothValueSlider
                 value={zoomPercent}
@@ -1104,6 +1117,25 @@ export default function CameraScreen() {
               ) : (
                 <View style={styles.captureSideSpacer} />
               )}
+              <Pressable
+                style={styles.galleryButton}
+                onPress={openPersonalGallery}
+                accessibilityRole="button"
+                accessibilityLabel="개인 갤러리 열기"
+              >
+                {recentPhoto ? (
+                  <Image
+                    source={{ uri: recentPhoto.previewUri ?? recentPhoto.uri }}
+                    style={styles.galleryThumb}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={styles.galleryEmptyThumb}>
+                    <View style={styles.galleryEmptyLine} />
+                    <View style={styles.galleryEmptyDot} />
+                  </View>
+                )}
+              </Pressable>
             </View>
           </>
         )}
@@ -1148,65 +1180,46 @@ function SmoothValueSlider({
   onCommit
 }: SmoothValueSliderProps) {
   const [trackWidth, setTrackWidth] = useState(0);
-  const isDraggingRef = useRef(false);
   const thumbX = useSharedValue(0);
+  const dragStartThumbX = useSharedValue(0);
+  const isDragging = useSharedValue(false);
 
   useEffect(() => {
-    if (trackWidth <= 0 || isDraggingRef.current) {
+    if (trackWidth <= 0) {
       return;
     }
 
     const ratio = (value - min) / (max - min);
-    thumbX.value = Math.max(0, Math.min(1, ratio)) * trackWidth;
-  }, [max, min, trackWidth, thumbX, value]);
-
-  const commitFromRatio = useCallback(
-    (ratio: number) => {
-      const nextRatio = Math.max(0, Math.min(1, ratio));
-      onCommit(min + nextRatio * (max - min));
-    },
-    [max, min, onCommit]
-  );
-
-  const setValueFromLocation = useCallback(
-    (locationX: number, commit: boolean) => {
-      if (trackWidth <= 0) {
-        return;
-      }
-
-      const nextX = Math.max(0, Math.min(trackWidth, locationX));
+    const nextX = Math.max(0, Math.min(1, ratio)) * trackWidth;
+    if (!isDragging.value) {
       thumbX.value = nextX;
+    }
+  }, [isDragging, max, min, trackWidth, thumbX, value]);
 
-      if (commit) {
-        commitFromRatio(nextX / trackWidth);
-      }
-    },
-    [commitFromRatio, thumbX, trackWidth]
-  );
-
-  const sliderPanResponder = useMemo(
+  const sliderGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          isDraggingRef.current = true;
-          setValueFromLocation(event.nativeEvent.locationX, false);
-        },
-        onPanResponderMove: (event) => {
-          setValueFromLocation(event.nativeEvent.locationX, false);
-        },
-        onPanResponderRelease: (event) => {
-          setValueFromLocation(event.nativeEvent.locationX, true);
-          isDraggingRef.current = false;
-        },
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderTerminate: (event) => {
-          setValueFromLocation(event.nativeEvent.locationX, true);
-          isDraggingRef.current = false;
-        }
-      }),
-    [setValueFromLocation]
+      Gesture.Pan()
+        .enabled(trackWidth > 0)
+        .hitSlop({ top: 10, bottom: 10, left: 10, right: 10 })
+        .onBegin((event) => {
+          isDragging.value = true;
+          dragStartThumbX.value = Math.max(0, Math.min(trackWidth, event.x));
+          thumbX.value = dragStartThumbX.value;
+        })
+        .onUpdate((event) => {
+          const nextX = Math.max(
+            0,
+            Math.min(trackWidth, dragStartThumbX.value + event.translationX)
+          );
+          thumbX.value = nextX;
+        })
+        .onFinalize(() => {
+          const nextRatio =
+            trackWidth > 0 ? Math.max(0, Math.min(1, thumbX.value / trackWidth)) : 0;
+          isDragging.value = false;
+          runOnJS(onCommit)(min + nextRatio * (max - min));
+        }),
+    [dragStartThumbX, isDragging, max, min, onCommit, thumbX, trackWidth]
   );
 
   const fillStyle = useAnimatedStyle(() => ({
@@ -1224,15 +1237,17 @@ function SmoothValueSlider({
           <Text selectable={false} style={styles.compactSliderLabel}>
             {label}
           </Text>
-          <Animated.View
-            style={[styles.sizeTrack, styles.compactSizeTrack]}
-            onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-            {...sliderPanResponder.panHandlers}
-          >
-            <View style={styles.sizeTrackFillBase} />
-            <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
-            <Animated.View style={[styles.sizeThumb, thumbStyle]} />
-          </Animated.View>
+          <GestureDetector gesture={sliderGesture}>
+            <Animated.View
+              collapsable={false}
+              style={[styles.sizeTrack, styles.compactSizeTrack]}
+              onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+            >
+              <View style={styles.sizeTrackFillBase} />
+              <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
+              <Animated.View style={[styles.sizeThumb, thumbStyle]} />
+            </Animated.View>
+          </GestureDetector>
           <Text selectable={false} style={styles.compactSliderValue}>
             {Math.round(value)}%
           </Text>
@@ -1251,15 +1266,17 @@ function SmoothValueSlider({
           {Math.round(value)}%
         </Text>
       </View>
-      <Animated.View
-        style={styles.sizeTrack}
-        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-        {...sliderPanResponder.panHandlers}
-      >
-        <View style={styles.sizeTrackFillBase} />
-        <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
-        <Animated.View style={[styles.sizeThumb, thumbStyle]} />
-      </Animated.View>
+      <GestureDetector gesture={sliderGesture}>
+        <Animated.View
+          collapsable={false}
+          style={styles.sizeTrack}
+          onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+        >
+          <View style={styles.sizeTrackFillBase} />
+          <Animated.View style={[styles.sizeTrackFill, fillStyle]} />
+          <Animated.View style={[styles.sizeThumb, thumbStyle]} />
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -1721,7 +1738,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 18,
     height: 18,
-    marginLeft: -9,
     borderWidth: 2,
     borderColor: colors.text,
     backgroundColor: colors.background
@@ -1829,6 +1845,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     paddingVertical: 0
   },
+  captureOpacityControl: {
+    width: "80%",
+    minHeight: 30,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+    paddingVertical: 0
+  },
   captureRow: {
     width: "100%",
     minHeight: 66,
@@ -1890,7 +1913,43 @@ const styles = StyleSheet.create({
     minWidth: 128,
     minHeight: 30,
     justifyContent: "center",
-    paddingHorizontal: 2
+    paddingHorizontal: 2,
+    display: "none"
+  },
+  galleryButton: {
+    position: "absolute",
+    right: 0,
+    width: 54,
+    height: 54,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.62)",
+    backgroundColor: "rgba(0, 0, 0, 0.38)"
+  },
+  galleryThumb: {
+    width: "100%",
+    height: "100%"
+  },
+  galleryEmptyThumb: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.08)"
+  },
+  galleryEmptyLine: {
+    width: 24,
+    height: 2,
+    backgroundColor: colors.inverse
+  },
+  galleryEmptyDot: {
+    width: 8,
+    height: 8,
+    marginTop: 5,
+    borderRadius: 999,
+    backgroundColor: colors.inverse
   },
   opacityStepButton: {
     width: 34,

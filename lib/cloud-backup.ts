@@ -1,25 +1,66 @@
 import { type User } from "firebase/auth";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  serverTimestamp,
+  setDoc
+} from "firebase/firestore";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
+import { getAppSettings } from "@/lib/app-settings";
 import { firestore, firebaseStorage } from "@/lib/firebase";
+import { getPhotos } from "@/lib/photo-library";
+import { isCreatorSubscriptionActive, getBackupDeleteAfter, type UserSubscription } from "@/lib/subscription";
+import { getMadeVideos } from "@/lib/video-library";
+import { getImageBundleWorks } from "@/lib/work-library";
 import type { MadeVideoItem } from "@/types/video";
 import type { ImageBundleWorkItem } from "@/types/work";
 
-const getFileExtension = (uri: string, fallback: string) => {
+export type BackupSummary = {
+  photoCount: number;
+  imageBundleCount: number;
+  videoCount: number;
+  deleteAfter: string | null;
+};
+
+export type CloudBackupOverview = BackupSummary & {
+  status: string;
+  backedUpAt: string | null;
+  deletedAt: string | null;
+};
+
+const fileNameFromUri = (uri: string, fallback: string) => {
   const cleanUri = uri.split("?")[0] ?? uri;
-  const match = cleanUri.match(/\.([a-zA-Z0-9]+)$/);
-  return match?.[1]?.toLowerCase() ?? fallback;
+  const fileName = cleanUri.split("/").pop();
+  return fileName && fileName.includes(".") ? fileName : fallback;
+};
+
+const getContentType = (uri: string) => {
+  const lowerUri = uri.toLowerCase();
+  if (lowerUri.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lowerUri.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  if (lowerUri.endsWith(".mp4")) {
+    return "video/mp4";
+  }
+
+  return "image/jpeg";
 };
 
 const uploadLocalFile = async ({
   uri,
-  storagePath,
-  contentType
+  storagePath
 }: {
   uri: string;
   storagePath: string;
-  contentType: string;
 }) => {
   if (!firebaseStorage) {
     throw new Error("Firebase Storage가 설정되지 않았습니다.");
@@ -28,54 +69,196 @@ const uploadLocalFile = async ({
   const response = await fetch(uri);
   const blob = await response.blob();
   const fileRef = ref(firebaseStorage, storagePath);
-  await uploadBytes(fileRef, blob, { contentType });
+  await uploadBytes(fileRef, blob, {
+    contentType: getContentType(uri)
+  });
   return getDownloadURL(fileRef);
 };
 
-export const backupMadeVideo = async ({
-  user,
-  video,
-  enabled
-}: {
-  user: User | null;
-  video: MadeVideoItem;
-  enabled: boolean;
-}) => {
-  if (!enabled || !user || !firestore || !firebaseStorage) {
-    return null;
+const emptyBackupOverview: CloudBackupOverview = {
+  photoCount: 0,
+  imageBundleCount: 0,
+  videoCount: 0,
+  deleteAfter: null,
+  status: "none",
+  backedUpAt: null,
+  deletedAt: null
+};
+
+const getCollectionSize = async (userId: string, collectionName: string) => {
+  if (!firestore) {
+    return 0;
   }
 
-  const videoUrl = await uploadLocalFile({
-    uri: video.uri,
-    storagePath: `users/${user.uid}/videos/${video.id}.mp4`,
-    contentType: "video/mp4"
-  });
-  const coverUrl = video.coverUri
-    ? await uploadLocalFile({
-        uri: video.coverUri,
-        storagePath: `users/${user.uid}/video-covers/${video.id}.${getFileExtension(
-          video.coverUri,
-          "jpg"
-        )}`,
-        contentType: "image/jpeg"
-      })
-    : null;
+  const snapshot = await getDocs(collection(firestore, "users", userId, collectionName));
+  return snapshot.size;
+};
+
+const refreshBackupOverview = async (userId: string) => {
+  if (!firestore) {
+    return emptyBackupOverview;
+  }
+
+  const [photoCount, imageBundleCount, videoCount] = await Promise.all([
+    getCollectionSize(userId, "photoBackups"),
+    getCollectionSize(userId, "imageWorks"),
+    getCollectionSize(userId, "videos")
+  ]);
+
+  const overview: CloudBackupOverview = {
+    ...emptyBackupOverview,
+    photoCount,
+    imageBundleCount,
+    videoCount,
+    status: photoCount + imageBundleCount + videoCount > 0 ? "active" : "none"
+  };
 
   await setDoc(
-    doc(firestore, "users", user.uid, "videos", video.id),
+    doc(firestore, "users", userId, "backups", "current"),
     {
-      ...video,
-      videoUrl,
-      coverUrl,
-      localUri: video.uri,
-      localCoverUri: video.coverUri ?? null,
-      backedUpAt: serverTimestamp(),
+      photoCount,
+      imageBundleCount,
+      videoCount,
+      status: overview.status,
       updatedAt: serverTimestamp()
     },
     { merge: true }
   );
 
-  return { videoUrl, coverUrl };
+  return overview;
+};
+
+export const subscribeCloudBackupOverview = ({
+  user,
+  onChange
+}: {
+  user: User | null;
+  onChange: (overview: CloudBackupOverview) => void;
+}) => {
+  if (!user || !firestore) {
+    onChange(emptyBackupOverview);
+    return () => undefined;
+  }
+
+  return onSnapshot(doc(firestore, "users", user.uid, "backups", "current"), (snapshot) => {
+    const data = snapshot.data() as Partial<CloudBackupOverview> | undefined;
+    onChange({
+      ...emptyBackupOverview,
+      ...data,
+      status: data?.status ?? (snapshot.exists() ? "active" : "none"),
+      photoCount: data?.photoCount ?? 0,
+      imageBundleCount: data?.imageBundleCount ?? 0,
+      videoCount: data?.videoCount ?? 0,
+      deleteAfter: data?.deleteAfter ?? null,
+      backedUpAt: data?.backedUpAt ?? null,
+      deletedAt: data?.deletedAt ?? null
+    });
+  });
+};
+
+export const ensureBackupAvailable = (subscription: UserSubscription) => {
+  if (isCreatorSubscriptionActive(subscription)) {
+    return;
+  }
+
+  const deleteAfter = getBackupDeleteAfter(subscription.expiresAt);
+  throw new Error(
+    `영상 내보내기 월결제 기간이 만료되어 백업을 사용할 수 없습니다. 기존 백업은 ${new Intl.DateTimeFormat(
+      "ko-KR",
+      {
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+      }
+    ).format(new Date(deleteAfter))} 이후 제거될 수 있습니다.`
+  );
+};
+
+export const backupCurrentWorkspace = async ({
+  user,
+  subscription
+}: {
+  user: User | null;
+  subscription: UserSubscription;
+}): Promise<BackupSummary> => {
+  if (!user) {
+    throw new Error("로그인 후 백업할 수 있습니다.");
+  }
+
+  if (!firestore || !firebaseStorage) {
+    throw new Error("Firebase 연결 정보가 아직 설정되지 않았습니다.");
+  }
+
+  ensureBackupAvailable(subscription);
+
+  const [settings, photos, imageBundles, videos] = await Promise.all([
+    getAppSettings(),
+    getPhotos(),
+    getImageBundleWorks(),
+    getMadeVideos()
+  ]);
+  const deleteAfter = subscription.expiresAt
+    ? getBackupDeleteAfter(subscription.expiresAt)
+    : null;
+  const backedUpAt = new Date().toISOString();
+
+  for (const photo of photos) {
+    const photoFileName = fileNameFromUri(photo.uri, `${photo.id}.jpg`);
+    const photoPath = `users/${user.uid}/backups/photos/${photo.id}-${photoFileName}`;
+    const photoDownloadUrl = await uploadLocalFile({
+      uri: photo.uri,
+      storagePath: photoPath
+    });
+    let previewDownloadUrl: string | null = null;
+    let previewPath: string | null = null;
+
+    if (photo.previewUri) {
+      const previewFileName = fileNameFromUri(photo.previewUri, `${photo.id}-preview.jpg`);
+      previewPath = `users/${user.uid}/backups/photo-previews/${photo.id}-${previewFileName}`;
+      previewDownloadUrl = await uploadLocalFile({
+        uri: photo.previewUri,
+        storagePath: previewPath
+      });
+    }
+
+    await setDoc(doc(firestore, "users", user.uid, "photoBackups", photo.id), {
+      ...photo,
+      uri: photoDownloadUrl,
+      localUri: photo.uri,
+      storagePath: photoPath,
+      previewUri: previewDownloadUrl,
+      localPreviewUri: photo.previewUri ?? null,
+      previewStoragePath: previewPath,
+      backedUpAt,
+      deleteAfter,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  await setDoc(
+    doc(firestore, "users", user.uid, "backups", "current"),
+    {
+      userId: user.uid,
+      settings,
+      imageBundles,
+      videos,
+      photoCount: photos.length,
+      imageBundleCount: imageBundles.length,
+      videoCount: videos.length,
+      status: "active",
+      backedUpAt,
+      deleteAfter,
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return {
+    photoCount: photos.length,
+    imageBundleCount: imageBundles.length,
+    videoCount: videos.length,
+    deleteAfter
+  };
 };
 
 export const backupImageBundleWork = async ({
@@ -87,35 +270,232 @@ export const backupImageBundleWork = async ({
   work: ImageBundleWorkItem;
   enabled: boolean;
 }) => {
-  if (!enabled || !user || !firestore || !firebaseStorage) {
+  if (!enabled || !user) {
     return null;
   }
 
-  const imageUrls = await Promise.all(
-    work.imageUris.map((uri, index) =>
-      uploadLocalFile({
-        uri,
-        storagePath: `users/${user.uid}/image-works/${work.id}/${String(index + 1).padStart(
-          2,
-          "0"
-        )}.${getFileExtension(uri, "jpg")}`,
-        contentType: uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg"
-      })
-    )
-  );
+  if (!firestore || !firebaseStorage) {
+    throw new Error("Firebase 연결 정보가 아직 설정되지 않았습니다.");
+  }
+
+  const backedUpImageUris: string[] = [];
+  for (const [index, imageUri] of work.imageUris.entries()) {
+    const fileName = fileNameFromUri(imageUri, `${work.id}-${index}.jpg`);
+    const storagePath = `users/${user.uid}/backups/image-works/${work.id}/${index}-${fileName}`;
+    const downloadUrl = await uploadLocalFile({ uri: imageUri, storagePath });
+    backedUpImageUris.push(downloadUrl);
+  }
 
   await setDoc(
     doc(firestore, "users", user.uid, "imageWorks", work.id),
     {
       ...work,
-      imageUrls,
       localImageUris: work.imageUris,
-      localCoverUri: work.coverUri ?? null,
-      backedUpAt: serverTimestamp(),
+      imageUris: backedUpImageUris,
+      storagePaths: work.imageUris.map((_, index) => {
+        const fileName = fileNameFromUri(work.imageUris[index], `${work.id}-${index}.jpg`);
+        return `users/${user.uid}/backups/image-works/${work.id}/${index}-${fileName}`;
+      }),
+      backedUpAt: new Date().toISOString(),
       updatedAt: serverTimestamp()
     },
     { merge: true }
   );
 
-  return { imageUrls };
+  await refreshBackupOverview(user.uid);
+
+  return {
+    ...work,
+    imageUris: backedUpImageUris
+  };
+};
+
+export const backupMadeVideo = async ({
+  user,
+  video,
+  enabled
+}: {
+  user: User | null;
+  video: MadeVideoItem;
+  enabled: boolean;
+}) => {
+  if (!enabled || !user) {
+    return null;
+  }
+
+  if (!firestore || !firebaseStorage) {
+    throw new Error("Firebase 연결 정보가 아직 설정되지 않았습니다.");
+  }
+
+  const fileName = fileNameFromUri(video.uri, `${video.id}.mp4`);
+  const storagePath = `users/${user.uid}/backups/videos/${video.id}-${fileName}`;
+  const downloadUrl = await uploadLocalFile({
+    uri: video.uri,
+    storagePath
+  });
+
+  await setDoc(
+    doc(firestore, "users", user.uid, "videos", video.id),
+    {
+      ...video,
+      localUri: video.uri,
+      uri: downloadUrl,
+      storagePath,
+      backedUpAt: new Date().toISOString(),
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  await refreshBackupOverview(user.uid);
+
+  return {
+    ...video,
+    uri: downloadUrl
+  };
+};
+
+export const markBackupExpired = async ({
+  user,
+  subscription
+}: {
+  user: User | null;
+  subscription: UserSubscription;
+}) => {
+  if (!user || !firestore || isCreatorSubscriptionActive(subscription)) {
+    return;
+  }
+
+  const deleteAfter = getBackupDeleteAfter(subscription.expiresAt);
+  await setDoc(
+    doc(firestore, "users", user.uid, "backups", "current"),
+    {
+      status: "expired",
+      deleteAfter,
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+};
+
+export const cleanupExpiredBackup = async ({
+  user,
+  subscription
+}: {
+  user: User | null;
+  subscription: UserSubscription;
+}) => {
+  if (!user || !firestore || !firebaseStorage || isCreatorSubscriptionActive(subscription)) {
+    return false;
+  }
+
+  const deleteAfter = getBackupDeleteAfter(subscription.expiresAt);
+  if (new Date(deleteAfter).getTime() > Date.now()) {
+    await markBackupExpired({ user, subscription });
+    return false;
+  }
+
+  const snapshot = await getDocs(collection(firestore, "users", user.uid, "photoBackups"));
+  for (const item of snapshot.docs) {
+    const data = item.data() as {
+      storagePath?: string | null;
+      previewStoragePath?: string | null;
+    };
+
+    if (data.storagePath) {
+      await deleteObject(ref(firebaseStorage, data.storagePath)).catch(() => undefined);
+    }
+
+    if (data.previewStoragePath) {
+      await deleteObject(ref(firebaseStorage, data.previewStoragePath)).catch(() => undefined);
+    }
+
+    await deleteDoc(item.ref);
+  }
+
+  await setDoc(
+    doc(firestore, "users", user.uid, "backups", "current"),
+    {
+      status: "deleted",
+      deletedAt: new Date().toISOString(),
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return true;
+};
+
+export const deleteCloudBackupData = async ({ user }: { user: User | null }) => {
+  if (!user) {
+    throw new Error("로그인 후 백업 데이터를 삭제할 수 있습니다.");
+  }
+
+  if (!firestore || !firebaseStorage) {
+    throw new Error("Firebase 연결 정보가 아직 설정되지 않았습니다.");
+  }
+
+  const photoSnapshot = await getDocs(collection(firestore, "users", user.uid, "photoBackups"));
+  for (const item of photoSnapshot.docs) {
+    const data = item.data() as {
+      storagePath?: string | null;
+      previewStoragePath?: string | null;
+    };
+
+    if (data.storagePath) {
+      await deleteObject(ref(firebaseStorage, data.storagePath)).catch(() => undefined);
+    }
+
+    if (data.previewStoragePath) {
+      await deleteObject(ref(firebaseStorage, data.previewStoragePath)).catch(() => undefined);
+    }
+
+    await deleteDoc(item.ref);
+  }
+
+  const imageWorkSnapshot = await getDocs(collection(firestore, "users", user.uid, "imageWorks"));
+  for (const item of imageWorkSnapshot.docs) {
+    const data = item.data() as {
+      storagePaths?: string[] | null;
+    };
+
+    for (const storagePath of data.storagePaths ?? []) {
+      await deleteObject(ref(firebaseStorage, storagePath)).catch(() => undefined);
+    }
+
+    await deleteDoc(item.ref);
+  }
+
+  const videoSnapshot = await getDocs(collection(firestore, "users", user.uid, "videos"));
+  for (const item of videoSnapshot.docs) {
+    const data = item.data() as {
+      storagePath?: string | null;
+    };
+
+    if (data.storagePath) {
+      await deleteObject(ref(firebaseStorage, data.storagePath)).catch(() => undefined);
+    }
+
+    await deleteDoc(item.ref);
+  }
+
+  await setDoc(
+    doc(firestore, "users", user.uid, "backups", "current"),
+    {
+      status: "deleted",
+      photoCount: 0,
+      imageBundleCount: 0,
+      videoCount: 0,
+      deletedAt: new Date().toISOString(),
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return {
+    photoCount: photoSnapshot.size,
+    imageBundleCount: imageWorkSnapshot.size,
+    videoCount: videoSnapshot.size,
+    deleteAfter: null
+  };
 };

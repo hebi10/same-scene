@@ -1,6 +1,7 @@
 {
   "projects": {
-    "travelframe": "travelframe-4e1fb"
+    "travelframe": "travelframe-4e1fb",
+    "default": "travelframe-4e1fb"
   },
   "targets": {},
   "etags": {}

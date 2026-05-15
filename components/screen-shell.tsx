@@ -9,6 +9,7 @@ import {
 import { useAppAppearance } from "@/lib/app-appearance";
 
 const TAB_BAR_RESERVED_HEIGHT = 104;
+const MAX_CONTENT_WIDTH = 750;
 
 type ScreenShellProps = {
   eyebrow?: string;
@@ -86,6 +87,9 @@ const styles = StyleSheet.create({
     flex: 1
   },
   content: {
+    width: "100%",
+    maxWidth: MAX_CONTENT_WIDTH,
+    alignSelf: "center",
     paddingBottom: spacing.section * 2
   },
   header: {
