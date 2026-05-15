@@ -27,6 +27,11 @@ export type UserSubscription = {
   productName: string;
 };
 
+export type UserSubscriptionProducts = {
+  adRemove: UserSubscription | null;
+  creatorMonthly: UserSubscription | null;
+};
+
 const createSubscriptionStorageKey = (uid: string) =>
   `travel-frame.subscription.${uid}.v1`;
 
@@ -72,6 +77,11 @@ export const isAdFreeSubscription = (subscription: UserSubscription | null) => {
     subscription?.productId === "creator_monthly"
   );
 };
+
+export const isSubscriptionProductActive = (
+  subscription: UserSubscription | null,
+  productId: Exclude<SubscriptionProductId, "free">
+) => isPremiumSubscription(subscription) && subscription?.productId === productId;
 
 export const getBackupDeleteAfter = (expiresAt?: string | null) => {
   const baseDate = expiresAt ? new Date(expiresAt) : new Date();
@@ -142,6 +152,42 @@ export const getUserSubscription = async (user: User | null) => {
     return subscription;
   } catch {
     return getLocalSubscription(user.uid);
+  }
+};
+
+export const getUserSubscriptionProducts = async (
+  user: User | null
+): Promise<UserSubscriptionProducts> => {
+  if (!user || !firestore) {
+    return {
+      adRemove: null,
+      creatorMonthly: null
+    };
+  }
+
+  try {
+    const [adRemoveSnapshot, creatorSnapshot] = await Promise.all([
+      getDoc(doc(firestore, "users", user.uid, "subscriptions", "ad_remove")),
+      getDoc(doc(firestore, "users", user.uid, "subscriptions", "creator_monthly"))
+    ]);
+    const adRemove = adRemoveSnapshot.exists()
+      ? parseSubscription(JSON.stringify(adRemoveSnapshot.data()))
+      : null;
+    const creatorMonthly = creatorSnapshot.exists()
+      ? parseSubscription(JSON.stringify(creatorSnapshot.data()))
+      : null;
+
+    return {
+      adRemove: isSubscriptionProductActive(adRemove, "ad_remove") ? adRemove : null,
+      creatorMonthly: isSubscriptionProductActive(creatorMonthly, "creator_monthly")
+        ? creatorMonthly
+        : null
+    };
+  } catch {
+    return {
+      adRemove: null,
+      creatorMonthly: null
+    };
   }
 };
 
@@ -216,14 +262,15 @@ export const activateMockSubscription = async (
     provider: subscription.provider,
     productName: subscription.productName,
     priceLabel: subscription.priceLabel,
+    amount: 3900,
+    currency: "KRW",
+    billingType: isCreator ? "monthly" : "one_time",
     startedAt: subscription.startedAt,
     expiresAt: subscription.expiresAt,
     createdAt: serverTimestamp()
   });
 
-  await saveLocalSubscription(
-    user.uid,
-    shouldReplaceCurrent ? subscription : currentSubscription
-  );
-  return subscription;
+  const activeSubscription = shouldReplaceCurrent ? subscription : currentSubscription;
+  await saveLocalSubscription(user.uid, activeSubscription);
+  return activeSubscription;
 };

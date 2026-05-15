@@ -19,16 +19,55 @@ service cloud.firestore {
       return request.resource.data.uid == userId;
     }
 
-    function isMockSubscription() {
+    function isMockProductId() {
+      return request.resource.data.productId == "ad_remove"
+        || request.resource.data.productId == "creator_monthly";
+    }
+
+    function isValidMockSubscriptionDocument(subscriptionId) {
+      return subscriptionId == "current"
+        || subscriptionId == request.resource.data.productId;
+    }
+
+    function isMockSubscription(subscriptionId) {
       return request.resource.data.plan == "premium"
         && request.resource.data.status == "active"
-        && request.resource.data.provider == "mock";
+        && request.resource.data.provider == "mock"
+        && isMockProductId()
+        && isValidMockSubscriptionDocument(subscriptionId)
+        && (
+          (
+            request.resource.data.productId == "ad_remove"
+            && request.resource.data.expiresAt == null
+            && request.resource.data.priceLabel == "3,900원"
+            && request.resource.data.productName == "광고 제거"
+          )
+          || (
+            request.resource.data.productId == "creator_monthly"
+            && request.resource.data.expiresAt is string
+            && request.resource.data.priceLabel == "월 3,900원"
+            && request.resource.data.productName == "영상 내보내기"
+          )
+        );
     }
 
     function isMockPaymentEvent() {
       return request.resource.data.type == "mock_payment_completed"
         && request.resource.data.provider == "mock"
-        && request.resource.data.plan == "premium";
+        && request.resource.data.plan == "premium"
+        && isMockProductId()
+        && (
+          (
+            request.resource.data.productId == "ad_remove"
+            && request.resource.data.productName == "광고 제거"
+            && request.resource.data.priceLabel == "3,900원"
+          )
+          || (
+            request.resource.data.productId == "creator_monthly"
+            && request.resource.data.productName == "영상 내보내기"
+            && request.resource.data.priceLabel == "월 3,900원"
+          )
+        );
     }
 
     function isAdminSubscriptionDocument(subscriptionId) {
@@ -65,6 +104,19 @@ service cloud.firestore {
         allow read, create, update, delete: if isOwner(userId) || isAdmin();
       }
 
+      match /usage/{usageGroup}/weeks/{weekId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId)
+          && usageGroup == "videoExports"
+          && request.resource.data.userId == userId
+          && request.resource.data.weekId == weekId
+          && request.resource.data.count is int
+          && request.resource.data.count >= 0
+          && request.resource.data.count <= 1
+          && request.resource.data.limit == 1;
+        allow delete: if isAdmin();
+      }
+
       match /subscriptions/{subscriptionId} {
         allow read: if isOwner(userId) || isAdmin();
 
@@ -72,7 +124,7 @@ service cloud.firestore {
         // Replace create/update with trusted server-only writes when real billing is added.
         allow create, update: if isOwner(userId)
           && isAdminSubscriptionDocument(subscriptionId)
-          && isMockSubscription();
+          && isMockSubscription(subscriptionId);
         allow create, update: if isAdmin() && isAdminSubscriptionDocument(subscriptionId);
 
         allow delete: if isAdmin();

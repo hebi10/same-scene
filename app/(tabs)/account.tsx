@@ -20,6 +20,10 @@ import {
   PRIVACY_POLICY_URL
 } from "@/constants/legal-links";
 import { useAuth } from "@/lib/auth-context";
+import {
+  getUserSubscriptionProducts,
+  type UserSubscriptionProducts
+} from "@/lib/subscription";
 import { getPhotos } from "@/lib/photo-library";
 import { getMadeVideos } from "@/lib/video-library";
 import { getImageBundleWorks } from "@/lib/work-library";
@@ -56,6 +60,11 @@ const initialStats: UsageStats = {
   editedPhotos: 0,
   imageBundles: 0,
   videos: 0
+};
+
+const initialSubscriptionProducts: UserSubscriptionProducts = {
+  adRemove: null,
+  creatorMonthly: null
 };
 
 const signedInBenefits = [
@@ -181,6 +190,9 @@ export default function AccountScreen() {
   const [isMusicSubmitting, setIsMusicSubmitting] = useState(false);
   const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<PaymentPlan | null>(null);
   const [stats, setStats] = useState<UsageStats>(initialStats);
+  const [subscriptionProducts, setSubscriptionProducts] = useState<UserSubscriptionProducts>(
+    initialSubscriptionProducts
+  );
   const [musicTracks, setMusicTracks] = useState<UserMusicTrack[]>([]);
   const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
   const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
@@ -191,11 +203,18 @@ export default function AccountScreen() {
       let isActive = true;
 
       const loadStats = async () => {
-        const [photos, videos, imageBundles, userMusicTracks] = await Promise.all([
+        const [
+          photos,
+          videos,
+          imageBundles,
+          userMusicTracks,
+          nextSubscriptionProducts
+        ] = await Promise.all([
           getPhotos(),
           getMadeVideos(),
           getImageBundleWorks(),
-          user ? syncUserMusicTracks(user) : Promise.resolve([])
+          user ? syncUserMusicTracks(user) : Promise.resolve([]),
+          getUserSubscriptionProducts(user)
         ]);
 
         if (!isActive) {
@@ -209,6 +228,7 @@ export default function AccountScreen() {
           videos: videos.length
         });
         setMusicTracks(userMusicTracks);
+        setSubscriptionProducts(nextSubscriptionProducts);
       };
 
       loadStats();
@@ -403,8 +423,23 @@ export default function AccountScreen() {
 
     runAuthAction(async () => {
       await startMockSubscription(plan.id === "creator" ? "creator_monthly" : "ad_remove");
+      setSubscriptionProducts(await getUserSubscriptionProducts(user));
     }, `${plan.title} 결제가 완료되었습니다. 결제 기록을 저장했습니다.`);
     setSelectedPaymentPlan(null);
+  };
+
+  const getPaymentPlanStatus = (plan: PaymentPlan) => {
+    if (plan.id === "adRemove") {
+      return {
+        active: Boolean(subscriptionProducts.adRemove),
+        label: subscriptionProducts.adRemove ? "구매 완료" : plan.billing
+      };
+    }
+
+    return {
+      active: Boolean(subscriptionProducts.creatorMonthly),
+      label: subscriptionProducts.creatorMonthly ? "구독 중" : plan.billing
+    };
   };
 
   const handleUploadMusic = async () => {
@@ -641,6 +676,14 @@ export default function AccountScreen() {
                 }
               />
               <InfoRow
+                label="광고 제거"
+                value={subscriptionProducts.adRemove ? "구매 완료" : "미구매"}
+              />
+              <InfoRow
+                label="영상 내보내기"
+                value={subscriptionProducts.creatorMonthly ? "구독 중" : "미구독"}
+              />
+              <InfoRow
                 label="구독 시작일"
                 value={subscription.startedAt ? formatDateTime(subscription.startedAt) : "아직 구독 전"}
               />
@@ -691,8 +734,8 @@ export default function AccountScreen() {
                       </Text>
                     </View>
                     <StatusBadge
-                      label={subscription.status === "active" ? "이용 중" : plan.billing}
-                      active={subscription.status === "active"}
+                      label={getPaymentPlanStatus(plan).label}
+                      active={getPaymentPlanStatus(plan).active}
                     />
                   </View>
                   <Text selectable style={[styles.benefitText, themed.mutedText]}>

@@ -395,34 +395,7 @@ export const cleanupExpiredBackup = async ({
     return false;
   }
 
-  const snapshot = await getDocs(collection(firestore, "users", user.uid, "photoBackups"));
-  for (const item of snapshot.docs) {
-    const data = item.data() as {
-      storagePath?: string | null;
-      previewStoragePath?: string | null;
-    };
-
-    if (data.storagePath) {
-      await deleteObject(ref(firebaseStorage, data.storagePath)).catch(() => undefined);
-    }
-
-    if (data.previewStoragePath) {
-      await deleteObject(ref(firebaseStorage, data.previewStoragePath)).catch(() => undefined);
-    }
-
-    await deleteDoc(item.ref);
-  }
-
-  await setDoc(
-    doc(firestore, "users", user.uid, "backups", "current"),
-    {
-      status: "deleted",
-      deletedAt: new Date().toISOString(),
-      updatedAt: serverTimestamp()
-    },
-    { merge: true }
-  );
-
+  await deleteCloudBackupData({ user });
   return true;
 };
 

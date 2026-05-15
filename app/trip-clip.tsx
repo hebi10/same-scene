@@ -89,6 +89,12 @@ import { backupImageBundleWork, backupMadeVideo } from "@/lib/cloud-backup";
 import { shouldShowAds } from "@/lib/ad-entitlement";
 import { isCreatorSubscriptionActive } from "@/lib/subscription";
 import {
+  getWeeklyVideoExportUsage,
+  releaseWeeklyVideoExport,
+  reserveWeeklyVideoExport,
+  type WeeklyVideoExportUsage
+} from "@/lib/video-export-quota";
+import {
   syncUserMusicTracks,
   type UserMusicTrack
 } from "@/lib/user-music";
@@ -338,7 +344,7 @@ export default function TripClipScreen() {
     videoId?: string;
   }>();
   const recorder = useOptionalViewRecorder();
-  const { user, isLoggedIn, hasFullAccess, subscription } = useAuth();
+  const { user, isLoggedIn, subscription } = useAuth();
   const insets = useSafeAreaInsets();
   const bottomSafePadding = Math.max(insets.bottom + 12, 28);
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
@@ -374,6 +380,8 @@ export default function TripClipScreen() {
   const [isExporting, setIsExporting] = useState(false);
   const [renderedVideoUri, setRenderedVideoUri] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [weeklyVideoExportUsage, setWeeklyVideoExportUsage] =
+    useState<WeeklyVideoExportUsage | null>(null);
   const [exportProgress, setExportProgress] =
     useState<ExportProgress>(initialExportProgress);
   const [isExportComingSoonVisible, setIsExportComingSoonVisible] = useState(false);
@@ -413,6 +421,7 @@ export default function TripClipScreen() {
     musicMode === "device"
       ? customMusic?.name ?? "내 음악 선택"
       : "무음";
+  const creatorExportActive = isCreatorSubscriptionActive(subscription);
   const player = useAudioPlayer(activeMusicSource);
 
   const selectedPhotos = useMemo(
@@ -485,13 +494,15 @@ export default function TripClipScreen() {
 
   const loadPhotos = useCallback(async () => {
     setIsLoading(true);
-    const [storedPhotos, settings, storedMusicTracks] = await Promise.all([
+    const [storedPhotos, settings, storedMusicTracks, storedWeeklyUsage] = await Promise.all([
       getPhotos().then(ensurePhotoPreviews),
       getAppSettings(),
-      user ? syncUserMusicTracks(user) : Promise.resolve([])
+      user ? syncUserMusicTracks(user) : Promise.resolve([]),
+      getWeeklyVideoExportUsage(user)
     ]);
     setPhotos(storedPhotos);
     setUserMusicTracks(storedMusicTracks);
+    setWeeklyVideoExportUsage(storedWeeklyUsage);
     setSelectedUserMusicId((current) => {
       if (current && storedMusicTracks.some((track) => track.id === current)) {
         return current;
@@ -1094,6 +1105,66 @@ export default function TripClipScreen() {
   };
 
   const saveSelectedExport = async () => {
+    if (exportFormat !== "mp4") {
+      await executeSelectedExport();
+      return;
+    }
+
+    if (!isLoggedIn || !user) {
+      setExportMessage("로그인하면 무료로 주 1회 MP4 영상을 만들 수 있습니다.");
+      setExportProgress({
+        visible: true,
+        percent: 100,
+        title: "로그인이 필요합니다",
+        detail: "무료 MP4 저장은 로그인한 사용자에게 주 1회 제공됩니다.",
+        error: "마이페이지에서 로그인한 뒤 다시 시도해 주세요."
+      });
+      return;
+    }
+
+    if (creatorExportActive) {
+      await executeSelectedExport();
+      return;
+    }
+
+    try {
+      const usage = await getWeeklyVideoExportUsage(user);
+      setWeeklyVideoExportUsage(usage);
+
+      if (usage && usage.remaining <= 0) {
+        setExportMessage("이번 주 무료 MP4 저장 횟수를 모두 사용했습니다.");
+        setExportProgress({
+          visible: true,
+          percent: 100,
+          title: "무료 저장 한도 초과",
+          detail: "무료 로그인 사용자는 MP4 영상을 주 1개까지 만들 수 있습니다.",
+          error: `이번 주(${usage.weekLabel}) 무료 저장 1회를 이미 사용했습니다. 영상 내보내기 플랜을 이용하면 제한 없이 만들 수 있습니다.`
+        });
+        return;
+      }
+
+      await executeSelectedExport({ countWeeklyMp4: true });
+    } catch (error) {
+      const message = getUserFacingErrorMessage(
+        error,
+        "무료 저장 가능 여부를 확인하지 못했습니다."
+      );
+      setExportMessage(message);
+      setExportProgress({
+        visible: true,
+        percent: 100,
+        title: "저장 확인 실패",
+        detail: "무료 MP4 저장 가능 여부를 확인하지 못했습니다.",
+        error: message
+      });
+    }
+  };
+
+  const executeSelectedExport = async ({
+    countWeeklyMp4 = false
+  }: {
+    countWeeklyMp4?: boolean;
+  } = {}) => {
     if (exportFormat === "mp4" && Platform.OS === "web" && !DIRECT_EXPORT_ENABLED) {
       setIsExportComingSoonVisible(true);
       return;
@@ -1104,6 +1175,8 @@ export default function TripClipScreen() {
       return;
     }
 
+    let reservedWeeklyExport = false;
+
     try {
       setIsExporting(true);
       setExportProgress({
@@ -1112,6 +1185,12 @@ export default function TripClipScreen() {
         title: "저장 준비 중",
         detail: "선택한 저장 형식을 확인하고 있습니다."
       });
+
+      if (countWeeklyMp4 && exportFormat === "mp4" && user) {
+        await reserveWeeklyVideoExport(user);
+        reservedWeeklyExport = true;
+        setWeeklyVideoExportUsage(await getWeeklyVideoExportUsage(user));
+      }
 
       if (exportFormat === "images") {
         if (selectedPhotos.length === 0) {
@@ -1279,10 +1358,17 @@ export default function TripClipScreen() {
           : "저장한 영상을 작업물 목록에서 확인할 수 있습니다.",
         completedVideoId: savedVideo.id
       });
-      if (shouldShowAds(subscription)) {
+      if (reservedWeeklyExport && user) {
+        setWeeklyVideoExportUsage(await getWeeklyVideoExportUsage(user));
+      }
+      if (shouldShowAds(subscription) && !reservedWeeklyExport) {
         setIsPostSaveAdVisible(true);
       }
     } catch (error) {
+      if (reservedWeeklyExport && user) {
+        await releaseWeeklyVideoExport(user).catch(() => undefined);
+        setWeeklyVideoExportUsage(await getWeeklyVideoExportUsage(user).catch(() => null));
+      }
       const message = getUserFacingErrorMessage(error, "저장하지 못했습니다.");
       setExportMessage(message);
       setExportProgress({
@@ -1883,9 +1969,20 @@ export default function TripClipScreen() {
           <Text selectable style={styles.exportDetail}>
             저장할 형식을 선택한 뒤 바로 핸드폰 앨범에 저장하거나 공유합니다.
           </Text>
-          {!isLoggedIn ? (
+          {exportFormat === "mp4" && !isLoggedIn ? (
             <Text selectable style={styles.exportNotice}>
-              인증되지 않은 계정이나 비로그인 상태에서 MP4를 저장하면 트래블프레임 워터마크가 들어갑니다.
+              MP4 저장은 로그인 후 사용할 수 있습니다. 무료 로그인 사용자는 주 1개까지 만들 수 있습니다.
+            </Text>
+          ) : exportFormat === "mp4" && creatorExportActive ? (
+            <Text selectable style={styles.exportNotice}>
+              영상 내보내기 플랜 이용 중입니다. MP4 영상을 제한 없이 저장할 수 있습니다.
+            </Text>
+          ) : exportFormat === "mp4" ? (
+            <Text selectable style={styles.exportNotice}>
+              무료 MP4 저장은 주 1개까지 가능합니다.
+              {weeklyVideoExportUsage
+                ? ` 이번 주 남은 횟수는 ${weeklyVideoExportUsage.remaining}개입니다.`
+                : " 저장 전 가능 횟수를 확인합니다."}
             </Text>
           ) : cloudBackupEnabled ? (
             <Text selectable style={styles.exportNotice}>
@@ -2032,7 +2129,7 @@ export default function TripClipScreen() {
               frame={recordingFrame}
               template={template}
               transition={transition}
-              showWatermark={!hasFullAccess}
+              showWatermark={!creatorExportActive}
             />
           </OptionalRecordingView>
         </View>
