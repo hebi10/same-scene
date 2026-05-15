@@ -34,6 +34,7 @@ import {
   type ScreenLayout,
   type ThemeMode
 } from "@/lib/app-settings";
+import { type AppPalette, useAppAppearance } from "@/lib/app-appearance";
 import { useAuth } from "@/lib/auth-context";
 
 type SettingKey =
@@ -148,6 +149,8 @@ const screenLayoutLabel: Record<ScreenLayout, string> = {
 };
 
 export default function SettingsScreen() {
+  const { palette } = useAppAppearance();
+  const themed = useMemo(() => createThemedStyles(palette), [palette]);
   const {
     user,
     isLoggedIn,
@@ -303,22 +306,34 @@ export default function SettingsScreen() {
         safeTop
       >
         <SectionBlock title="계정">
-          <View style={styles.accountPanel}>
+          <View style={[styles.accountPanel, themed.panelStrong]}>
             <View style={styles.accountHeader}>
               <View style={styles.accountCopy}>
-                <Text selectable style={styles.accountTitle}>
+                <Text selectable style={[styles.accountTitle, themed.text]}>
                   {isLoggedIn ? "로그인됨" : "비로그인 사용 중"}
                 </Text>
-                <Text selectable style={styles.accountDetail}>
+                <Text selectable style={[styles.accountDetail, themed.mutedText]}>
                   {isLoggedIn
                     ? `${user?.email ?? "계정"}으로 전체 기능을 사용할 수 있습니다.`
                     : "비로그인 상태에서는 무료 기능과 워터마크가 적용됩니다."}
                 </Text>
               </View>
-              <View style={[styles.accountBadge, isLoggedIn && styles.accountBadgeActive]}>
+              <View
+                style={[
+                  styles.accountBadge,
+                  themed.border,
+                  isLoggedIn && styles.accountBadgeActive,
+                  isLoggedIn && themed.activeFill
+                ]}
+              >
                 <Text
                   selectable={false}
-                  style={[styles.accountBadgeText, isLoggedIn && styles.accountBadgeTextActive]}
+                  style={[
+                    styles.accountBadgeText,
+                    themed.text,
+                    isLoggedIn && styles.accountBadgeTextActive,
+                    isLoggedIn && themed.inverseText
+                  ]}
                 >
                   {isLoggedIn ? "전체" : "무료"}
                 </Text>
@@ -326,7 +341,7 @@ export default function SettingsScreen() {
             </View>
 
             {!isFirebaseReady ? (
-              <Text selectable style={styles.accountNotice}>
+              <Text selectable style={[styles.accountNotice, themed.mutedText]}>
                 Firebase 웹 앱 config를 .env에 넣으면 로그인 기능이 활성화됩니다.
               </Text>
             ) : null}
@@ -339,34 +354,42 @@ export default function SettingsScreen() {
                   autoCorrect={false}
                   keyboardType="email-address"
                   placeholder="이메일"
-                  placeholderTextColor={colors.faint}
-                  style={styles.authInput}
+                  placeholderTextColor={palette.faint}
+                  style={[styles.authInput, themed.input]}
                   onChangeText={setAuthEmail}
                 />
                 <TextInput
                   value={authPassword}
                   secureTextEntry
                   placeholder="비밀번호 6자리 이상"
-                  placeholderTextColor={colors.faint}
-                  style={styles.authInput}
+                  placeholderTextColor={palette.faint}
+                  style={[styles.authInput, themed.input]}
                   onChangeText={setAuthPassword}
                 />
                 <View style={styles.authActions}>
                   <Pressable
                     disabled={isAuthLoading || isAuthSubmitting}
-                    style={[styles.authPrimaryButton, isAuthSubmitting && styles.disabledButton]}
+                    style={[
+                      styles.authPrimaryButton,
+                      themed.activeFill,
+                      isAuthSubmitting && styles.disabledButton
+                    ]}
                     onPress={() => handleAuthAction("signIn")}
                   >
-                    <Text selectable={false} style={styles.authPrimaryButtonText}>
+                    <Text selectable={false} style={[styles.authPrimaryButtonText, themed.inverseText]}>
                       로그인
                     </Text>
                   </Pressable>
                   <Pressable
                     disabled={isAuthLoading || isAuthSubmitting}
-                    style={[styles.authSecondaryButton, isAuthSubmitting && styles.disabledButton]}
+                    style={[
+                      styles.authSecondaryButton,
+                      themed.secondaryButton,
+                      isAuthSubmitting && styles.disabledButton
+                    ]}
                     onPress={() => handleAuthAction("signUp")}
                   >
-                    <Text selectable={false} style={styles.authSecondaryButtonText}>
+                    <Text selectable={false} style={[styles.authSecondaryButtonText, themed.text]}>
                       회원가입
                     </Text>
                   </Pressable>
@@ -384,10 +407,14 @@ export default function SettingsScreen() {
                 />
                 <Pressable
                   disabled={isAuthSubmitting}
-                  style={[styles.authSecondaryButton, isAuthSubmitting && styles.disabledButton]}
+                  style={[
+                    styles.authSecondaryButton,
+                    themed.secondaryButton,
+                    isAuthSubmitting && styles.disabledButton
+                  ]}
                   onPress={() => handleAuthAction("logOut")}
                 >
-                  <Text selectable={false} style={styles.authSecondaryButtonText}>
+                  <Text selectable={false} style={[styles.authSecondaryButtonText, themed.text]}>
                     로그아웃
                   </Text>
                 </Pressable>
@@ -395,7 +422,7 @@ export default function SettingsScreen() {
             ) : null}
 
             {authMessage ? (
-              <Text selectable style={styles.authMessage}>
+              <Text selectable style={[styles.authMessage, themed.mutedText]}>
                 {authMessage}
               </Text>
             ) : null}
@@ -442,20 +469,22 @@ export default function SettingsScreen() {
         </SectionBlock>
 
         <SectionBlock title="가이드">
-          <View style={styles.guidePanel}>
+          <View style={[styles.guidePanel, themed.panel]}>
             <View style={styles.guidePanelHeader}>
               <View style={styles.guidePanelCopy}>
-                <Text selectable style={styles.guidePanelTitle}>
+                <Text selectable style={[styles.guidePanelTitle, themed.text]}>
                   전체 가이드 설정
                 </Text>
-                <Text selectable style={styles.guidePanelDetail}>
+                <Text selectable style={[styles.guidePanelDetail, themed.mutedText]}>
                   카메라, 사진 편집, 영상 만들기에 같은 가이드가 적용됩니다.
                 </Text>
               </View>
               <Pressable
                 style={[
                   styles.guideVisibleButton,
-                  settings.guideVisible && styles.guideVisibleButtonActive
+                  themed.secondaryButton,
+                  settings.guideVisible && styles.guideVisibleButtonActive,
+                  settings.guideVisible && themed.activeFill
                 ]}
                 onPress={() => updateSetting({ guideVisible: !settings.guideVisible })}
               >
@@ -463,7 +492,9 @@ export default function SettingsScreen() {
                   selectable={false}
                   style={[
                     styles.guideVisibleButtonText,
-                    settings.guideVisible && styles.guideVisibleButtonTextActive
+                    themed.text,
+                    settings.guideVisible && styles.guideVisibleButtonTextActive,
+                    settings.guideVisible && themed.inverseText
                   ]}
                 >
                   {settings.guideVisible ? "켜짐" : "꺼짐"}
@@ -472,7 +503,7 @@ export default function SettingsScreen() {
             </View>
 
             <View style={styles.compactGroup}>
-              <Text selectable style={styles.compactGroupTitle}>
+              <Text selectable style={[styles.compactGroupTitle, themed.text]}>
                 가이드라인
               </Text>
               <View style={styles.compactOptionRow}>
@@ -481,7 +512,9 @@ export default function SettingsScreen() {
                     key={guide}
                     style={[
                       styles.compactOption,
-                      settings.defaultGuide === guide && styles.compactOptionActive
+                      themed.secondaryButton,
+                      settings.defaultGuide === guide && styles.compactOptionActive,
+                      settings.defaultGuide === guide && themed.activeFill
                     ]}
                     onPress={() => updateSetting({ defaultGuide: guide, guideVisible: true })}
                   >
@@ -489,7 +522,9 @@ export default function SettingsScreen() {
                       selectable={false}
                       style={[
                         styles.compactOptionText,
-                        settings.defaultGuide === guide && styles.compactOptionTextActive
+                        themed.text,
+                        settings.defaultGuide === guide && styles.compactOptionTextActive,
+                        settings.defaultGuide === guide && themed.inverseText
                       ]}
                     >
                       {GUIDE_LABELS[guide]}
@@ -500,7 +535,7 @@ export default function SettingsScreen() {
             </View>
 
             <View style={styles.compactGroup}>
-              <Text selectable style={styles.compactGroupTitle}>
+              <Text selectable style={[styles.compactGroupTitle, themed.text]}>
                 크기
               </Text>
               <View style={styles.compactOptionRow}>
@@ -509,7 +544,9 @@ export default function SettingsScreen() {
                     key={size.value}
                     style={[
                       styles.compactOption,
-                      settings.guideSize === size.value && styles.compactOptionActive
+                      themed.secondaryButton,
+                      settings.guideSize === size.value && styles.compactOptionActive,
+                      settings.guideSize === size.value && themed.activeFill
                     ]}
                     onPress={() => updateSetting({ guideSize: size.value, guideVisible: true })}
                   >
@@ -517,7 +554,9 @@ export default function SettingsScreen() {
                       selectable={false}
                       style={[
                         styles.compactOptionText,
-                        settings.guideSize === size.value && styles.compactOptionTextActive
+                        themed.text,
+                        settings.guideSize === size.value && styles.compactOptionTextActive,
+                        settings.guideSize === size.value && themed.inverseText
                       ]}
                     >
                       {size.label}
@@ -528,7 +567,7 @@ export default function SettingsScreen() {
             </View>
 
             <View style={styles.compactGroup}>
-              <Text selectable style={styles.compactGroupTitle}>
+              <Text selectable style={[styles.compactGroupTitle, themed.text]}>
                 색상
               </Text>
               <View style={styles.colorGrid}>
@@ -538,7 +577,12 @@ export default function SettingsScreen() {
                   return (
                     <Pressable
                       key={color.label}
-                      style={[styles.colorButton, isActive && styles.colorButtonActive]}
+                      style={[
+                        styles.colorButton,
+                        themed.colorButton,
+                        isActive && styles.colorButtonActive,
+                        isActive && themed.activeBorder
+                      ]}
                       onPress={() =>
                         updateSetting({ guideColor: color.value, guideVisible: true })
                       }
@@ -550,7 +594,7 @@ export default function SettingsScreen() {
                           color.label === "흰색" && styles.colorSwatchLight
                         ]}
                       />
-                      <Text selectable={false} style={styles.colorButtonText}>
+                      <Text selectable={false} style={[styles.colorButtonText, themed.text]}>
                         {color.label}
                       </Text>
                     </Pressable>
@@ -560,7 +604,7 @@ export default function SettingsScreen() {
             </View>
 
             <View style={styles.compactGroup}>
-              <Text selectable style={styles.compactGroupTitle}>
+              <Text selectable style={[styles.compactGroupTitle, themed.text]}>
                 오버레이 투명도
               </Text>
               <View style={styles.compactOptionRow}>
@@ -569,7 +613,9 @@ export default function SettingsScreen() {
                     key={opacity}
                     style={[
                       styles.compactOption,
-                      settings.overlayOpacity === opacity && styles.compactOptionActive
+                      themed.secondaryButton,
+                      settings.overlayOpacity === opacity && styles.compactOptionActive,
+                      settings.overlayOpacity === opacity && themed.activeFill
                     ]}
                     onPress={() => updateSetting({ overlayOpacity: opacity })}
                   >
@@ -577,7 +623,9 @@ export default function SettingsScreen() {
                       selectable={false}
                       style={[
                         styles.compactOptionText,
-                        settings.overlayOpacity === opacity && styles.compactOptionTextActive
+                        themed.text,
+                        settings.overlayOpacity === opacity && styles.compactOptionTextActive,
+                        settings.overlayOpacity === opacity && themed.inverseText
                       ]}
                     >
                       {Math.round(opacity * 100)}%
@@ -612,13 +660,16 @@ export default function SettingsScreen() {
         onRequestClose={() => setActiveSetting(null)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalPanel}>
+          <View style={[styles.modalPanel, themed.modalPanel]}>
             <View style={styles.modalHeader}>
-              <Text selectable style={styles.modalTitle}>
+              <Text selectable style={[styles.modalTitle, themed.text]}>
                 {modalTitle}
               </Text>
-              <Pressable style={styles.closeButton} onPress={() => setActiveSetting(null)}>
-                <Text selectable={false} style={styles.closeButtonText}>
+              <Pressable
+                style={[styles.closeButton, themed.secondaryButton]}
+                onPress={() => setActiveSetting(null)}
+              >
+                <Text selectable={false} style={[styles.closeButtonText, themed.text]}>
                   닫기
                 </Text>
               </Pressable>
@@ -797,20 +848,106 @@ function OptionButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const { palette } = useAppAppearance();
+  const themed = useMemo(() => createThemedStyles(palette), [palette]);
+
   return (
-    <Pressable style={[styles.option, active && styles.optionActive]} onPress={onPress}>
+    <Pressable
+      style={[
+        styles.option,
+        themed.panel,
+        active && styles.optionActive,
+        active && themed.activeFill
+      ]}
+      onPress={onPress}
+    >
       <View style={styles.optionCopy}>
-        <Text selectable style={[styles.optionLabel, active && styles.optionLabelActive]}>
+        <Text
+          selectable
+          style={[
+            styles.optionLabel,
+            themed.text,
+            active && styles.optionLabelActive,
+            active && themed.inverseText
+          ]}
+        >
           {label}
         </Text>
-        <Text selectable style={[styles.optionDetail, active && styles.optionDetailActive]}>
+        <Text
+          selectable
+          style={[
+            styles.optionDetail,
+            themed.mutedText,
+            active && styles.optionDetailActive,
+            active && themed.inverseMutedText
+          ]}
+        >
           {detail}
         </Text>
       </View>
-      <View style={[styles.optionMark, active && styles.optionMarkActive]} />
+      <View style={[styles.optionMark, themed.optionMark, active && themed.optionMarkActive]} />
     </Pressable>
   );
 }
+
+const createThemedStyles = (palette: AppPalette) =>
+  StyleSheet.create({
+    panel: {
+      borderColor: palette.line,
+      backgroundColor: palette.surface
+    },
+    panelStrong: {
+      borderColor: palette.line,
+      backgroundColor: palette.surface
+    },
+    modalPanel: {
+      borderTopColor: palette.line,
+      backgroundColor: palette.background
+    },
+    border: {
+      borderColor: palette.line
+    },
+    activeBorder: {
+      borderColor: palette.text
+    },
+    activeFill: {
+      borderColor: palette.text,
+      backgroundColor: palette.text
+    },
+    secondaryButton: {
+      borderColor: palette.line,
+      backgroundColor: palette.background
+    },
+    colorButton: {
+      borderColor: palette.line,
+      backgroundColor: palette.background
+    },
+    input: {
+      borderColor: palette.line,
+      color: palette.text,
+      backgroundColor: palette.background
+    },
+    text: {
+      color: palette.text
+    },
+    mutedText: {
+      color: palette.muted
+    },
+    inverseText: {
+      color: palette.inverse
+    },
+    inverseMutedText: {
+      color: palette.inverse
+    },
+    optionMark: {
+      borderColor: palette.faint,
+      backgroundColor: "transparent"
+    },
+    optionMarkActive: {
+      borderColor: palette.inverse,
+      backgroundColor: palette.inverse
+    }
+  });
 
 const styles = StyleSheet.create({
   modalBackdrop: {

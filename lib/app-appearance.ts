@@ -1,5 +1,4 @@
-import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "react-native";
 
 import { colors } from "@/constants/app-theme";
@@ -13,6 +12,7 @@ import {
 } from "@/lib/app-settings";
 
 export type AppPalette = Record<keyof typeof colors, string>;
+export type EffectiveThemeMode = "light" | "dark";
 
 const darkPalette: AppPalette = {
   background: "#0f0f0f",
@@ -27,16 +27,21 @@ const darkPalette: AppPalette = {
   ink: "#ffffff"
 };
 
+export const getEffectiveThemeMode = (
+  settings: AppSettings,
+  systemScheme: "light" | "dark" | "unspecified" | null | undefined
+) =>
+  settings.themeMode === "system"
+    ? systemScheme === "dark"
+      ? "dark"
+      : "light"
+    : settings.themeMode;
+
 export const getAppPalette = (
   settings: AppSettings,
   systemScheme: "light" | "dark" | "unspecified" | null | undefined
 ) => {
-  const effectiveMode =
-    settings.themeMode === "system"
-      ? systemScheme === "dark"
-        ? "dark"
-        : "light"
-      : settings.themeMode;
+  const effectiveMode = getEffectiveThemeMode(settings, systemScheme);
 
   return effectiveMode === "dark" ? darkPalette : colors;
 };
@@ -45,24 +50,22 @@ export function useAppAppearance() {
   const systemScheme = useColorScheme();
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
 
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
+  useEffect(() => {
+    let isActive = true;
 
-      const loadSettings = async () => {
-        const storedSettings = await getAppSettings();
-        if (isActive) {
-          setSettings(storedSettings);
-        }
-      };
+    const loadSettings = async () => {
+      const storedSettings = await getAppSettings();
+      if (isActive) {
+        setSettings(storedSettings);
+      }
+    };
 
-      loadSettings();
+    loadSettings();
 
-      return () => {
-        isActive = false;
-      };
-    }, [])
-  );
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(
     () =>
@@ -76,9 +79,14 @@ export function useAppAppearance() {
     () => getAppPalette(settings, systemScheme),
     [settings, systemScheme]
   );
+  const effectiveThemeMode = useMemo(
+    () => getEffectiveThemeMode(settings, systemScheme),
+    [settings, systemScheme]
+  );
 
   return {
     settings,
+    effectiveThemeMode,
     palette,
     fontSizeScale: getFontSizeScale(settings.fontSize),
     layoutScale: getScreenLayoutScale(settings.screenLayout)

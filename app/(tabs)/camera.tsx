@@ -1148,10 +1148,11 @@ function SmoothValueSlider({
   onCommit
 }: SmoothValueSliderProps) {
   const [trackWidth, setTrackWidth] = useState(0);
+  const isDraggingRef = useRef(false);
   const thumbX = useSharedValue(0);
 
   useEffect(() => {
-    if (trackWidth <= 0) {
+    if (trackWidth <= 0 || isDraggingRef.current) {
       return;
     }
 
@@ -1189,6 +1190,7 @@ function SmoothValueSlider({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: (event) => {
+          isDraggingRef.current = true;
           setValueFromLocation(event.nativeEvent.locationX, false);
         },
         onPanResponderMove: (event) => {
@@ -1196,10 +1198,12 @@ function SmoothValueSlider({
         },
         onPanResponderRelease: (event) => {
           setValueFromLocation(event.nativeEvent.locationX, true);
+          isDraggingRef.current = false;
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderTerminate: (event) => {
           setValueFromLocation(event.nativeEvent.locationX, true);
+          isDraggingRef.current = false;
         }
       }),
     [setValueFromLocation]

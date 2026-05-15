@@ -29,6 +29,7 @@ import {
   USER_MUSIC_LIMIT,
   type UserMusicTrack
 } from "@/lib/user-music";
+import { type AppPalette, useAppAppearance } from "@/lib/app-appearance";
 
 type AuthMode = "signIn" | "signUp" | "recover";
 
@@ -103,6 +104,8 @@ const getAuthErrorMessage = (error: unknown) => {
 };
 
 export default function AccountScreen() {
+  const { palette } = useAppAppearance();
+  const themed = useMemo(() => createAccountThemedStyles(palette), [palette]);
   const {
     user,
     subscription,
@@ -244,23 +247,58 @@ export default function AccountScreen() {
       setMessage(null);
 
       const AuthSession = await import("expo-auth-session");
+      const clientId = Platform.OS === "android" ? googleAndroidClientId! : googleWebClientId!;
+      const redirectUri =
+        Platform.OS === "android"
+          ? "com.haebi.photoguide:/oauthredirect"
+          : AuthSession.makeRedirectUri({
+              scheme: "photoguide",
+              path: "oauthredirect"
+            });
+      const discovery = {
+        authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        tokenEndpoint: "https://oauth2.googleapis.com/token"
+      };
+      console.log("[google-auth]", {
+        platform: Platform.OS,
+        clientId,
+        redirectUri
+      });
       const request = new AuthSession.AuthRequest({
-        clientId: Platform.OS === "android" ? googleAndroidClientId! : googleWebClientId!,
-        responseType: AuthSession.ResponseType.IdToken,
-        redirectUri: "com.haebi.photoguide:/oauthredirect",
+        clientId,
+        responseType: AuthSession.ResponseType.Code,
+        redirectUri,
         scopes: ["openid", "profile", "email"],
-        usePKCE: false,
+        usePKCE: true,
         extraParams: {
-          nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           prompt: "select_account"
         }
       });
-      const result = await request.promptAsync({
-        authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth"
-      });
+      const result = await request.promptAsync(discovery);
 
       if (result.type === "success") {
-        const idToken = result.params.id_token;
+        if (result.params.error) {
+          throw new Error(result.params.error_description ?? result.params.error);
+        }
+
+        const code = result.params.code;
+        if (!code) {
+          throw new Error("Google 로그인 승인 코드를 받지 못했습니다.");
+        }
+
+        const token = await AuthSession.exchangeCodeAsync(
+          {
+            clientId,
+            code,
+            redirectUri,
+            scopes: ["openid", "profile", "email"],
+            extraParams: {
+              code_verifier: request.codeVerifier ?? ""
+            }
+          },
+          discovery
+        );
+        const idToken = token.idToken;
         if (!idToken) {
           throw new Error("Google 로그인 토큰을 받지 못했습니다.");
         }
@@ -369,11 +407,11 @@ export default function AccountScreen() {
     >
       {!isFirebaseReady ? (
         <SectionBlock title="연결 필요">
-          <View style={styles.noticePanel}>
-            <Text selectable style={styles.noticeTitle}>
+          <View style={[styles.noticePanel, themed.panel]}>
+            <Text selectable style={[styles.noticeTitle, themed.text]}>
               Firebase 설정이 필요합니다.
             </Text>
-            <Text selectable style={styles.noticeText}>
+            <Text selectable style={[styles.noticeText, themed.mutedText]}>
               .env에 Firebase 웹 앱 config를 넣고 Metro 서버를 다시 시작하면 로그인 기능이 활성화됩니다.
             </Text>
           </View>
@@ -393,7 +431,12 @@ export default function AccountScreen() {
               return (
                 <Pressable
                   key={item.value}
-                  style={[styles.segmentButton, isActive && styles.segmentButtonActive]}
+                  style={[
+                    styles.segmentButton,
+                    themed.secondaryButton,
+                    isActive && styles.segmentButtonActive,
+                    isActive && themed.activeFill
+                  ]}
                   onPress={() => {
                     setMode(item.value as AuthMode);
                     setMessage(null);
@@ -401,7 +444,12 @@ export default function AccountScreen() {
                 >
                   <Text
                     selectable={false}
-                    style={[styles.segmentText, isActive && styles.segmentTextActive]}
+                    style={[
+                      styles.segmentText,
+                      themed.text,
+                      isActive && styles.segmentTextActive,
+                      isActive && themed.inverseText
+                    ]}
                   >
                     {item.label}
                   </Text>
@@ -417,8 +465,8 @@ export default function AccountScreen() {
               autoCorrect={false}
               keyboardType="email-address"
               placeholder="이메일"
-              placeholderTextColor={colors.faint}
-              style={styles.input}
+              placeholderTextColor={palette.faint}
+              style={[styles.input, themed.input]}
               onChangeText={setEmail}
             />
             {mode !== "recover" ? (
@@ -426,22 +474,26 @@ export default function AccountScreen() {
                 value={password}
                 secureTextEntry
                 placeholder="비밀번호 6자리 이상"
-                placeholderTextColor={colors.faint}
-                style={styles.input}
+                placeholderTextColor={palette.faint}
+                style={[styles.input, themed.input]}
                 onChangeText={setPassword}
               />
             ) : (
-              <Text selectable style={styles.helpText}>
+              <Text selectable style={[styles.helpText, themed.mutedText]}>
                 트래블프레임의 아이디는 이메일입니다. 보안상 가입 여부는 직접 표시하지 않고,
                 입력한 이메일로 비밀번호 재설정 메일을 보냅니다.
               </Text>
             )}
             <Pressable
               disabled={isSubmitting || isAuthLoading}
-              style={[styles.primaryButton, (isSubmitting || isAuthLoading) && styles.disabledButton]}
+              style={[
+                styles.primaryButton,
+                themed.activeFill,
+                (isSubmitting || isAuthLoading) && styles.disabledButton
+              ]}
               onPress={handlePrimaryAuth}
             >
-              <Text selectable={false} style={styles.primaryButtonText}>
+              <Text selectable={false} style={[styles.primaryButtonText, themed.inverseText]}>
                 {mode === "signIn"
                   ? "이메일로 로그인"
                   : mode === "signUp"
@@ -453,11 +505,12 @@ export default function AccountScreen() {
               disabled={isSubmitting || isAuthLoading || isGoogleSubmitting}
               style={[
                 styles.secondaryButton,
+                themed.secondaryButton,
                 (isSubmitting || isAuthLoading || isGoogleSubmitting) && styles.disabledButton
               ]}
               onPress={handleGoogleSignIn}
             >
-              <Text selectable={false} style={styles.secondaryButtonText}>
+              <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                 {isGoogleSubmitting ? "Google 로그인 중" : "Google로 계속하기"}
               </Text>
             </Pressable>
@@ -468,7 +521,7 @@ export default function AccountScreen() {
       {isFirebaseReady && isLoggedIn ? (
         <>
           <SectionBlock title="내 정보">
-            <View style={styles.profilePanel}>
+            <View style={[styles.profilePanel, themed.panel]}>
               <View style={styles.profileHeader}>
                 <View style={styles.avatar}>
                   <Text selectable={false} style={styles.avatarText}>
@@ -476,10 +529,10 @@ export default function AccountScreen() {
                   </Text>
                 </View>
                 <View style={styles.profileCopy}>
-                  <Text selectable style={styles.profileName}>
+                  <Text selectable style={[styles.profileName, themed.text]}>
                     {user?.displayName || "이름 없음"}
                   </Text>
-                  <Text selectable style={styles.profileEmail}>
+                  <Text selectable style={[styles.profileEmail, themed.mutedText]}>
                     {accountEmail}
                   </Text>
                 </View>
@@ -490,13 +543,13 @@ export default function AccountScreen() {
               </View>
               {!hasFullAccess ? (
                 <View style={styles.verifyPanel}>
-                  <Text selectable style={styles.helpText}>
+                  <Text selectable style={[styles.helpText, themed.mutedText]}>
                     이메일 인증과 프리미엄 활성화가 완료되어야 운영 환경에서 전체 기능과 워터마크 제거를 안정적으로 사용할 수 있습니다.
                   </Text>
                   <View style={styles.inlineActions}>
                     <Pressable
                       disabled={isSubmitting}
-                      style={styles.secondaryButton}
+                      style={[styles.secondaryButton, themed.secondaryButton]}
                       onPress={() =>
                         runAuthAction(
                           sendVerificationEmail,
@@ -504,18 +557,18 @@ export default function AccountScreen() {
                         )
                       }
                     >
-                      <Text selectable={false} style={styles.secondaryButtonText}>
+                      <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                         인증 메일 재발송
                       </Text>
                     </Pressable>
                     <Pressable
                       disabled={isSubmitting}
-                      style={styles.secondaryButton}
+                      style={[styles.secondaryButton, themed.secondaryButton]}
                       onPress={() =>
                         runAuthAction(refreshUser, "인증 상태를 새로 확인했습니다.")
                       }
                     >
-                      <Text selectable={false} style={styles.secondaryButtonText}>
+                      <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                         상태 새로고침
                       </Text>
                     </Pressable>
@@ -550,13 +603,13 @@ export default function AccountScreen() {
           </SectionBlock>
 
           <SectionBlock title="구독 결제">
-            <View style={styles.planCard}>
+            <View style={[styles.planCard, themed.panelStrong]}>
               <View style={styles.planHeader}>
                 <View style={styles.planCopy}>
-                  <Text selectable style={styles.planTitle}>
+                  <Text selectable style={[styles.planTitle, themed.text]}>
                     트래블프레임 프리미엄
                   </Text>
-                  <Text selectable style={styles.planPrice}>
+                  <Text selectable style={[styles.planPrice, themed.text]}>
                     월 4,900원
                   </Text>
                 </View>
@@ -566,25 +619,25 @@ export default function AccountScreen() {
                 />
               </View>
               <View style={styles.benefitList}>
-                <Text selectable style={styles.benefitText}>
+                <Text selectable style={[styles.benefitText, themed.mutedText]}>
                   이메일 인증 후 워터마크 없이 MP4 저장
                 </Text>
-                <Text selectable style={styles.benefitText}>
+                <Text selectable style={[styles.benefitText, themed.mutedText]}>
                   영상 만들기와 클라우드 백업 이용
                 </Text>
-                <Text selectable style={styles.benefitText}>
+                <Text selectable style={[styles.benefitText, themed.mutedText]}>
                   향후 실제 결제 승인 후 같은 구독 상태로 연결
                 </Text>
               </View>
-              <Text selectable style={styles.helpText}>
+              <Text selectable style={[styles.helpText, themed.mutedText]}>
                 현재는 실제 결제가 아닌 테스트 결제입니다. 버튼을 누르면 결제 완료처럼 처리하고 Firestore에 기록을 남깁니다.
               </Text>
               <Pressable
                 disabled={isSubmitting}
-                style={[styles.primaryButton, isSubmitting && styles.disabledButton]}
+                style={[styles.primaryButton, themed.activeFill, isSubmitting && styles.disabledButton]}
                 onPress={handleMockPayment}
               >
-                <Text selectable={false} style={styles.primaryButtonText}>
+                <Text selectable={false} style={[styles.primaryButtonText, themed.inverseText]}>
                   {subscription.status === "active" ? "테스트 결제 다시 기록" : "테스트 결제하기"}
                 </Text>
               </Pressable>
@@ -602,24 +655,25 @@ export default function AccountScreen() {
 
           <SectionBlock title="내 음악 관리">
             <View style={styles.musicPanel}>
-              <Text selectable style={styles.helpText}>
+              <Text selectable style={[styles.helpText, themed.mutedText]}>
                 핸드폰에 있는 음악을 최대 {USER_MUSIC_LIMIT}개까지 저장하고 영상 만들기에서 사용할 수 있습니다.
               </Text>
               <View style={styles.musicHeader}>
-                <Text selectable style={styles.musicCount}>
+                <Text selectable style={[styles.musicCount, themed.text]}>
                   {musicTracks.length} / {USER_MUSIC_LIMIT}
                 </Text>
                 <Pressable
                   disabled={isMusicSubmitting || musicTracks.length >= USER_MUSIC_LIMIT}
                   style={[
                     styles.secondaryButton,
+                    themed.secondaryButton,
                     styles.musicUploadButton,
                     (isMusicSubmitting || musicTracks.length >= USER_MUSIC_LIMIT) &&
                       styles.disabledButton
                   ]}
                   onPress={handleUploadMusic}
                 >
-                  <Text selectable={false} style={styles.secondaryButtonText}>
+                  <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                     음악 추가
                   </Text>
                 </Pressable>
@@ -627,28 +681,32 @@ export default function AccountScreen() {
               <View style={styles.musicList}>
                 {musicTracks.length > 0 ? (
                   musicTracks.map((track) => (
-                    <View key={track.id} style={styles.musicItem}>
+                    <View key={track.id} style={[styles.musicItem, themed.panel]}>
                       <View style={styles.musicCopy}>
-                        <Text selectable style={styles.musicTitle}>
+                        <Text selectable style={[styles.musicTitle, themed.text]}>
                           {track.name}
                         </Text>
-                        <Text selectable style={styles.musicDetail}>
+                        <Text selectable style={[styles.musicDetail, themed.mutedText]}>
                           {formatDateTime(track.createdAt)}
                         </Text>
                       </View>
                       <Pressable
                         disabled={isMusicSubmitting}
-                        style={[styles.musicDeleteButton, isMusicSubmitting && styles.disabledButton]}
+                        style={[
+                          styles.musicDeleteButton,
+                          themed.secondaryButton,
+                          isMusicSubmitting && styles.disabledButton
+                        ]}
                         onPress={() => handleDeleteMusic(track)}
                       >
-                        <Text selectable={false} style={styles.musicDeleteText}>
+                        <Text selectable={false} style={[styles.musicDeleteText, themed.text]}>
                           삭제
                         </Text>
                       </Pressable>
                     </View>
                   ))
                 ) : (
-                  <Text selectable style={styles.helpText}>
+                  <Text selectable style={[styles.helpText, themed.mutedText]}>
                     아직 저장한 음악이 없습니다.
                   </Text>
                 )}
@@ -661,16 +719,20 @@ export default function AccountScreen() {
               <TextInput
                 value={displayName}
                 placeholder="표시 이름"
-                placeholderTextColor={colors.faint}
-                style={styles.input}
+                placeholderTextColor={palette.faint}
+                style={[styles.input, themed.input]}
                 onChangeText={setDisplayName}
               />
               <Pressable
                 disabled={isSubmitting}
-                style={[styles.secondaryButton, isSubmitting && styles.disabledButton]}
+                style={[
+                  styles.secondaryButton,
+                  themed.secondaryButton,
+                  isSubmitting && styles.disabledButton
+                ]}
                 onPress={handleUpdateName}
               >
-                <Text selectable={false} style={styles.secondaryButtonText}>
+                <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                   이름 저장
                 </Text>
               </Pressable>
@@ -678,41 +740,45 @@ export default function AccountScreen() {
                 value={newPassword}
                 secureTextEntry
                 placeholder="새 비밀번호 6자리 이상"
-                placeholderTextColor={colors.faint}
-                style={styles.input}
+                placeholderTextColor={palette.faint}
+                style={[styles.input, themed.input]}
                 onChangeText={setNewPassword}
               />
               <Pressable
                 disabled={isSubmitting}
-                style={[styles.secondaryButton, isSubmitting && styles.disabledButton]}
+                style={[
+                  styles.secondaryButton,
+                  themed.secondaryButton,
+                  isSubmitting && styles.disabledButton
+                ]}
                 onPress={handleChangePassword}
               >
-                <Text selectable={false} style={styles.secondaryButtonText}>
+                <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                   비밀번호 변경
                 </Text>
               </Pressable>
               <Pressable
                 disabled={isSubmitting}
-                style={[styles.primaryButton, isSubmitting && styles.disabledButton]}
+                style={[styles.primaryButton, themed.activeFill, isSubmitting && styles.disabledButton]}
                 onPress={() => runAuthAction(logOut, "로그아웃했습니다.")}
               >
-                <Text selectable={false} style={styles.primaryButtonText}>
+                <Text selectable={false} style={[styles.primaryButtonText, themed.inverseText]}>
                   로그아웃
                 </Text>
               </Pressable>
               <Pressable
-                style={styles.secondaryButton}
+                style={[styles.secondaryButton, themed.secondaryButton]}
                 onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
               >
-                <Text selectable={false} style={styles.secondaryButtonText}>
+                <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                   개인정보처리방침
                 </Text>
               </Pressable>
               <Pressable
-                style={styles.secondaryButton}
+                style={[styles.secondaryButton, themed.secondaryButton]}
                 onPress={() => Linking.openURL(DELETE_ACCOUNT_REQUEST_URL)}
               >
-                <Text selectable={false} style={styles.secondaryButtonText}>
+                <Text selectable={false} style={[styles.secondaryButtonText, themed.text]}>
                   계정 및 데이터 삭제 요청
                 </Text>
               </Pressable>
@@ -722,9 +788,9 @@ export default function AccountScreen() {
       ) : null}
 
       {message ? (
-        <View style={styles.messagePanel}>
-          {isSubmitting ? <ActivityIndicator color={colors.text} /> : null}
-          <Text selectable style={styles.messageText}>
+        <View style={[styles.messagePanel, themed.panel]}>
+          {isSubmitting ? <ActivityIndicator color={palette.text} /> : null}
+          <Text selectable style={[styles.messageText, themed.text]}>
             {message}
           </Text>
         </View>
@@ -734,9 +800,27 @@ export default function AccountScreen() {
 }
 
 function StatusBadge({ label, active }: { label: string; active?: boolean }) {
+  const { palette } = useAppAppearance();
+  const themed = useMemo(() => createAccountThemedStyles(palette), [palette]);
+
   return (
-    <View style={[styles.statusBadge, active && styles.statusBadgeActive]}>
-      <Text selectable={false} style={[styles.statusBadgeText, active && styles.statusBadgeTextActive]}>
+    <View
+      style={[
+        styles.statusBadge,
+        themed.secondaryButton,
+        active && styles.statusBadgeActive,
+        active && themed.activeFill
+      ]}
+    >
+      <Text
+        selectable={false}
+        style={[
+          styles.statusBadgeText,
+          themed.text,
+          active && styles.statusBadgeTextActive,
+          active && themed.inverseText
+        ]}
+      >
         {label}
       </Text>
     </View>
@@ -744,12 +828,15 @@ function StatusBadge({ label, active }: { label: string; active?: boolean }) {
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+  const { palette } = useAppAppearance();
+  const themed = useMemo(() => createAccountThemedStyles(palette), [palette]);
+
   return (
-    <View style={styles.infoRow}>
-      <Text selectable style={styles.infoLabel}>
+    <View style={[styles.infoRow, themed.bottomBorder]}>
+      <Text selectable style={[styles.infoLabel, themed.mutedText]}>
         {label}
       </Text>
-      <Text selectable style={styles.infoValue}>
+      <Text selectable style={[styles.infoValue, themed.text]}>
         {value}
       </Text>
     </View>
@@ -757,17 +844,57 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 function StatCard({ label, value }: { label: string; value: number }) {
+  const { palette } = useAppAppearance();
+  const themed = useMemo(() => createAccountThemedStyles(palette), [palette]);
+
   return (
-    <View style={styles.statCard}>
-      <Text selectable style={styles.statValue}>
+    <View style={[styles.statCard, themed.panel]}>
+      <Text selectable style={[styles.statValue, themed.text]}>
         {value}
       </Text>
-      <Text selectable style={styles.statLabel}>
+      <Text selectable style={[styles.statLabel, themed.mutedText]}>
         {label}
       </Text>
     </View>
   );
 }
+
+const createAccountThemedStyles = (palette: AppPalette) =>
+  StyleSheet.create({
+    panel: {
+      borderColor: palette.line,
+      backgroundColor: palette.surface
+    },
+    panelStrong: {
+      borderColor: palette.text,
+      backgroundColor: palette.surface
+    },
+    input: {
+      borderColor: palette.line,
+      color: palette.text,
+      backgroundColor: palette.background
+    },
+    secondaryButton: {
+      borderColor: palette.line,
+      backgroundColor: palette.background
+    },
+    activeFill: {
+      borderColor: palette.text,
+      backgroundColor: palette.text
+    },
+    text: {
+      color: palette.text
+    },
+    mutedText: {
+      color: palette.muted
+    },
+    inverseText: {
+      color: palette.inverse
+    },
+    bottomBorder: {
+      borderBottomColor: palette.line
+    }
+  });
 
 const styles = StyleSheet.create({
   noticePanel: {

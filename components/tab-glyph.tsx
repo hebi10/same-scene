@@ -1,6 +1,6 @@
 import { StyleSheet, View } from "react-native";
 
-import { colors } from "@/constants/app-theme";
+import { useAppAppearance } from "@/lib/app-appearance";
 
 type TabGlyphProps = {
   kind: "home" | "camera" | "studio" | "settings" | "account";
@@ -8,10 +8,21 @@ type TabGlyphProps = {
 };
 
 export function TabGlyph({ kind, focused }: TabGlyphProps) {
-  const strokeStyle = focused ? styles.strokeActive : styles.stroke;
+  const { palette } = useAppAppearance();
+  const strokeStyle = {
+    borderColor: focused ? palette.inverse : palette.text,
+    backgroundColor: focused ? palette.inverse : palette.text
+  };
 
   return (
-    <View style={[styles.glyph, focused && styles.focused]}>
+    <View
+      style={[
+        styles.glyph,
+        {
+          backgroundColor: focused ? palette.ink : palette.background
+        }
+      ]}
+    >
       {kind === "home" ? (
         <View style={styles.homeIcon}>
           <View style={[styles.homeRoof, strokeStyle]} />
@@ -20,7 +31,14 @@ export function TabGlyph({ kind, focused }: TabGlyphProps) {
       ) : null}
       {kind === "camera" ? (
         <View style={[styles.cameraRing, strokeStyle]}>
-          <View style={[styles.cameraDot, focused && styles.dotActive]} />
+          <View
+            style={[
+              styles.cameraDot,
+              {
+                backgroundColor: focused ? palette.inverse : palette.text
+              }
+            ]}
+          />
         </View>
       ) : null}
       {kind === "studio" ? (
@@ -53,19 +71,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.background
-  },
-  focused: {
-    backgroundColor: colors.ink
-  },
-  stroke: {
-    borderColor: colors.text,
-    backgroundColor: colors.text
-  },
-  strokeActive: {
-    borderColor: colors.inverse,
-    backgroundColor: colors.inverse
+    justifyContent: "center"
   },
   cameraRing: {
     width: 14,
@@ -79,11 +85,7 @@ const styles = StyleSheet.create({
   cameraDot: {
     width: 4,
     height: 4,
-    borderRadius: 999,
-    backgroundColor: colors.text
-  },
-  dotActive: {
-    backgroundColor: colors.inverse
+    borderRadius: 999
   },
   homeIcon: {
     width: 16,
