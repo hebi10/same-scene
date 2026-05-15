@@ -1,6 +1,8 @@
 node_modules/
 .expo/
 .tmp/
+android/
+credentials/
 dist/
 web-build/
 .env

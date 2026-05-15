@@ -28,9 +28,8 @@
 
 ## 공개 문구와 맞춰야 할 항목
 
-- 개인정보처리방침 URL: `https://sevim0104.cafe24.com/privacy/index.html`
-- 계정 및 데이터 삭제 안내 URL: `https://sevim0104.cafe24.com/privacy/photo-guide-delete-account.html`
+- 개인정보처리방침 URL: `https://travelframe-4e1fb.web.app/privacy`
+- 계정 및 데이터 삭제 안내 URL: `https://travelframe-4e1fb.web.app/privacy/photo-guide-delete-account`
 - 앱에 광고 포함 여부: 예
 - 카메라 권한 사용 목적: 사용자가 직접 사진을 촬영하고 구도 가이드를 확인하기 위함
 - 사진/미디어 접근 목적: 사용자가 선택한 사진, 영상, 음악을 편집, 저장, 백업하기 위함
-

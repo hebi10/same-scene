@@ -1,4 +1,4 @@
-export const PRIVACY_POLICY_URL = "https://sevim0104.cafe24.com/privacy/index.html";
+export const PRIVACY_POLICY_URL = "https://travelframe-4e1fb.web.app/privacy";
 
 export const DELETE_ACCOUNT_REQUEST_URL =
-  "https://sevim0104.cafe24.com/privacy/photo-guide-delete-account.html";
+  "https://travelframe-4e1fb.web.app/privacy/photo-guide-delete-account";
